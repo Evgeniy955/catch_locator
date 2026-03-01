@@ -1,3 +1,6 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.inspectorScript = void 0;
 /**
  * inspector-script.ts — Браузерный IIFE, инжектируется через page.addInitScript().
  * Конфиг принимается через window.__smartInspectorConfig (устанавливается ДО этого скрипта).
@@ -19,7 +22,7 @@
  *        Tailwind-классы (min-h-screen, flex-grow, text-3xl...) НЕ используются.
  *        Если стабильный якорь не найден в 6 уровнях — XPath = '' (не генерируется).
  */
-export const inspectorScript: string = `
+exports.inspectorScript = `
 (function () {
   'use strict';
 
@@ -457,4 +460,3 @@ export const inspectorScript: string = `
   console.log('[SmartInspector] ✅ Activated. Alt+Click any element to inspect locators.');
 })();
 `;
-

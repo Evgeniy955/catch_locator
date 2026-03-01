@@ -1,18 +1,39 @@
-﻿{
+{
   "name": "playwright-smart-inspector",
   "version": "1.0.0",
   "description": "Playwright library with interactive inspector and self-healing locators",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
-    "build": "tsc"
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "tsc -p tsconfig.build.json",
+    "test:manual": "playwright test",
+    "test:manual:demo": "playwright test --grep \"Demo\""
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOUR_USERNAME/catch_locator.git"
+  },
+  "keywords": [
+    "playwright",
+    "testing",
+    "inspector",
+    "locator",
+    "self-healing",
+    "test-automation"
+  ],
   "peerDependencies": {
     "@playwright/test": ">=1.40.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
+    "@types/node": "^25.3.3",
+    "cross-env": "^10.1.0",
     "typescript": "^5.9.3"
-  },
-  "private": true
+  }
 }

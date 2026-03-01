@@ -8,6 +8,12 @@ export interface SmartInspectorOptions {
    * По умолчанию: true
    */
   enabled: boolean;
+  /**
+   * Кастомные data-атрибуты — Priority 1 при поиске локаторов.
+   * Проверяются в порядке массива — первый найденный побеждает.
+   * По умолчанию: ["data-testid", "data-test-id", "data-e2e", "test-id"]
+   */
+  locatorAttributes?: string[];
 }
 
 /**
@@ -16,6 +22,20 @@ export interface SmartInspectorOptions {
  */
 export interface SmartInspectorFixtures {
   smartInspector: SmartInspectorOptions;
+}
+
+/** Полный результат Alt+Click — все варианты локаторов для выбора */
+export interface LocatorPayload {
+  /** Лучший Playwright-локатор по приоритету стратегий */
+  playwrightLocator: string;
+  /** Стабильный CSS-селектор (без позиционных div[2]/span[1]) */
+  cssSelector: string;
+  /** XPath от ближайшего стабильного предка — НЕ от корня документа */
+  xpath: string;
+  /** Использованная стратегия */
+  strategy: string;
+  /** HTML-тег элемента */
+  tagName: string;
 }
 
 /**
@@ -46,4 +66,3 @@ export interface HealingReport {
   /** Список альтернативных кандидатов, отсортированных по score DESC */
   candidates: LocatorCandidate[];
 }
-
