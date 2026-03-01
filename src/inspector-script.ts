@@ -1,276 +1,460 @@
 /**
- * inspector-script.ts
+ * inspector-script.ts — Браузерный IIFE, инжектируется через page.addInitScript().
+ * Конфиг принимается через window.__smartInspectorConfig (устанавливается ДО этого скрипта).
  *
- * Этот модуль экспортирует строку с браузерным JavaScript-кодом.
- * Строка передаётся в page.addInitScript() и выполняется в контексте браузера
- * при каждой навигации (Playwright автоматически переинжектирует её).
+ * Приоритеты Playwright-локатора (нативные методы Playwright):
+ *   P1: getByTestId()       — кастомные data-атрибуты + стабильный id
+ *   P2: getByRole()         — ARIA role + accessible name
+ *   P3: getByLabel()        — label[for] или обёртка <label>
+ *       getByPlaceholder()  — placeholder
+ *       getByAltText()      — alt (img)
+ *       getByTitle()        — title
+ *       getByText()         — видимый текст
+ *   P4: locator([name=])    — name-атрибут
+ *   P5: locator(.class)     — семантический класс (НЕ Tailwind-утилиты)
  *
- * ВАЖНО: Код внутри строки — это Vanilla JS (без TypeScript, без import).
- * Все типы и конструкции должны быть совместимы с ES2016+ браузера.
+ * CSS-селектор: tag#id / tag[attr] / tag.class / input[type] / составной через предка
+ *
+ * XPath: ТОЛЬКО от предка с id или кастомным data-атрибутом.
+ *        Tailwind-классы (min-h-screen, flex-grow, text-3xl...) НЕ используются.
+ *        Если стабильный якорь не найден в 6 уровнях — XPath = '' (не генерируется).
  */
 export const inspectorScript: string = `
 (function () {
   'use strict';
 
-  // ─── Утилиты ────────────────────────────────────────────────────────────────
+  var CFG   = window.__smartInspectorConfig || {};
+  var ATTRS = CFG.locatorAttributes || ['data-testid', 'data-test-id', 'data-e2e', 'test-id'];
 
-  /**
-   * Подсвечивает элемент красной рамкой на 1.5 секунды.
-   * Сохраняет оригинальный outline и восстанавливает его после.
-   */
-  function highlightElement(el) {
-    var original = el.style.outline;
-    el.style.outline = '3px solid #ff0000';
-    setTimeout(function () {
-      el.style.outline = original;
-    }, 1500);
+  // ─── Утилиты ──────────────────────────────────────────────────────────────────
+
+  function highlight(el) {
+    var prev = el.style.outline;
+    el.style.outline = '3px solid #ff3b30';
+    setTimeout(function () { el.style.outline = prev; }, 1500);
+  }
+
+  function norm(text, max) {
+    return (text || '').replace(/\\s+/g, ' ').trim().slice(0, max || 60);
+  }
+
+  function esc(v) {
+    return (v || '').replace(/["\\\\]/g, function (c) { return '\\\\' + c; });
   }
 
   /**
-   * Обрезает строку до maxLen символов, убирает переносы строк и лишние пробелы.
-   * Используется для нормализации innerText при генерации text-локатора.
+   * Семантический класс: НЕ Tailwind-утилита.
+   * Отбрасываем: text-3xl, p-4, min-h-screen, flex-grow, bg-white, md:flex, container и т.п.
    */
-  function normalizeText(text, maxLen) {
-    return text.replace(/\\s+/g, ' ').trim().slice(0, maxLen || 40);
+  function isSemantic(cls) {
+    if (!cls || cls.length < 3) return false;
+    if (/^[a-z]+-[0-9]/.test(cls))  return false;  // text-3xl, p-4, mt-2, gap-6
+    if (/^[a-z]+:[a-z]/.test(cls))  return false;  // md:flex, lg:hidden, sm:block
+    if (/^[0-9_\\-]+$/.test(cls))   return false;  // чисто цифровые / дефисные
+    // Tailwind-префиксы утилит
+    if (/^(flex|grid|block|inline|hidden|absolute|relative|fixed|sticky|static|overflow|truncate|whitespace|break|z-|w-|h-|min-|max-|m[trblxy]?-|p[trblxy]?-|gap-|space-|border|rounded|shadow|ring|outline|bg-|text-|font-|leading-|tracking-|align-|justify|items-|content-|self-|order-|col-|row-|opacity|cursor|pointer|select|resize|appearance|transition|duration|ease|delay|animate|scale|rotate|translate|skew|origin|sr-|not-sr|container|aspect-|grow|shrink|basis|float|clear|object|fill|stroke|accent|caret|decoration|underline|line-through|no-underline|uppercase|lowercase|capitalize|normal-case|italic|not-italic|tabular|oldstyle|diagonal|lining|proportional|slashed|numeric|ordinal|list-|from-|via-|to-|gradient|divide|place-|vertical-|table-|caption-|border-|inset-|top-|right-|bottom-|left-)/.test(cls)) return false;
+    return true;
   }
 
-  /**
-   * Экранирует спецсимволы CSS для использования в значениях атрибутов.
-   */
-  function escapeCss(value) {
-    return value.replace(/["\\\\]/g, function (ch) { return '\\\\' + ch; });
+  function semClass(el) {
+    if (!el || !el.className) return null;
+    var list = el.className.toString().split(/\\s+/).filter(isSemantic);
+    return list.length > 0 ? list[0] : null;
   }
 
-  // ─── Стратегии генерации локаторов ──────────────────────────────────────────
+  /** id не сгенерирован: не цифры, не :r0:, не radix-*, не содержит __ */
+  function isStableId(id) {
+    if (!id) return false;
+    if (/^[0-9]+$/.test(id))    return false;
+    if (/^:/.test(id))           return false;
+    if (/^radix-/.test(id))      return false;
+    if (id.indexOf('__') >= 0)   return false;
+    return true;
+  }
 
-  /**
-   * Стратегия 1: data-testid — самый надёжный селектор в Playwright.
-   * Возвращает [data-testid="value"] если атрибут присутствует.
-   */
-  function tryDataTestId(el) {
-    var val = el.getAttribute('data-testid');
-    if (val) {
-      return { selector: '[data-testid="' + escapeCss(val) + '"]', strategy: 'data-testid' };
+  // ─── P1: getByTestId / locator('#id') ─────────────────────────────────────────
+
+  function tryTestId(el) {
+    for (var i = 0; i < ATTRS.length; i++) {
+      var v = el.getAttribute(ATTRS[i]);
+      if (v) {
+        // getByTestId работает только для data-testid (дефолт Playwright)
+        var pw = ATTRS[i] === 'data-testid'
+          ? 'page.getByTestId("' + esc(v) + '")'
+          : 'page.locator("[' + ATTRS[i] + '=\\"' + esc(v) + '\\"]")';
+        return { pw: pw, strategy: ATTRS[i] };
+      }
+    }
+    var id = el.getAttribute('id');
+    if (isStableId(id)) {
+      return { pw: 'page.locator("#' + esc(id) + '")', strategy: 'id' };
     }
     return null;
   }
 
-  /**
-   * Стратегия 2: ARIA role + доступное имя.
-   * Строит Playwright-локатор вида role=button[name="Submit"].
-   * Имя берётся из aria-label, aria-labelledby (текст referenced-элемента),
-   * или innerText (до 40 символов).
-   */
+  // ─── P2: getByRole ────────────────────────────────────────────────────────────
+
   function tryRole(el) {
     var role = el.getAttribute('role');
-    // Нативные роли для часто используемых тегов
-    var nativeRoles = {
-      button: 'button', a: 'link', input: null, // input роль зависит от type
-      h1: 'heading', h2: 'heading', h3: 'heading',
-      h4: 'heading', h5: 'heading', h6: 'heading',
-      img: 'img', nav: 'navigation', main: 'main',
-      list: 'list', li: 'listitem', checkbox: 'checkbox'
+    var tagRoles = {
+      BUTTON: 'button', A: 'link',
+      H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', H5: 'heading', H6: 'heading',
+      IMG: 'img', NAV: 'navigation', MAIN: 'main', LI: 'listitem', UL: 'list', OL: 'list',
+      SELECT: 'combobox', TEXTAREA: 'textbox', TABLE: 'table', DIALOG: 'dialog', FORM: 'form'
     };
     if (!role) {
-      var tag = el.tagName.toLowerCase();
-      if (tag === 'input') {
-        var type = (el.getAttribute('type') || 'text').toLowerCase();
-        var inputRoles = { checkbox: 'checkbox', radio: 'radio', button: 'button', submit: 'button', reset: 'button' };
-        role = inputRoles[type] || null;
+      if (el.tagName === 'INPUT') {
+        var t = (el.getAttribute('type') || 'text').toLowerCase();
+        var ir = { checkbox: 'checkbox', radio: 'radio', button: 'button',
+                   submit: 'button', reset: 'button', search: 'searchbox', range: 'slider' };
+        role = ir[t] || 'textbox';
       } else {
-        role = nativeRoles[tag] || null;
+        role = tagRoles[el.tagName] || null;
       }
     }
     if (!role) return null;
 
-    // Определяем доступное имя
+    // Accessible name: aria-label -> aria-labelledby -> alt/value -> textContent
     var name = el.getAttribute('aria-label');
     if (!name) {
-      var labelledById = el.getAttribute('aria-labelledby');
-      if (labelledById) {
-        var labelEl = document.getElementById(labelledById);
-        if (labelEl) name = normalizeText(labelEl.textContent || '', 40);
+      var lbId = el.getAttribute('aria-labelledby');
+      if (lbId) {
+        var lbEl = document.getElementById(lbId);
+        if (lbEl) name = norm(lbEl.textContent, 60);
       }
     }
-    if (!name) {
-      name = normalizeText(el.textContent || '', 40);
-    }
+    if (!name && el.tagName === 'IMG')   name = el.getAttribute('alt') || '';
+    if (!name && el.tagName === 'INPUT') name = el.getAttribute('value') || '';
+    if (!name) name = norm(el.textContent, 60);
     if (!name) return null;
 
-    return {
-      selector: 'role=' + role + '[name="' + escapeCss(name) + '"]',
-      strategy: 'role'
-    };
+    return { pw: 'page.getByRole("' + role + '", { name: "' + esc(name) + '" })', strategy: 'role' };
   }
 
-  /**
-   * Стратегия 3: label[for] — подходит для полей формы.
-   * Ищет <label>, связанный с элементом через for=id или обёртку.
-   * Возвращает getByLabel-строку для Playwright.
-   */
-  function tryLabel(el) {
+  // ─── P3: getByLabel / getByPlaceholder / getByAltText / getByTitle / getByText ─
+
+  function tryText(el) {
+    // getByLabel — label[for=id]
     var id = el.getAttribute('id');
     if (id) {
-      var label = document.querySelector('label[for="' + id + '"]');
-      if (label) {
-        var text = normalizeText(label.textContent || '', 40);
-        if (text) return { selector: 'label=' + text, strategy: 'label' };
+      var lbl = document.querySelector('label[for="' + id + '"]');
+      if (lbl) {
+        var t = norm(lbl.textContent, 60);
+        if (t) return { pw: 'page.getByLabel("' + esc(t) + '")', strategy: 'label' };
       }
     }
-    // Проверяем, не обёрнут ли элемент в <label>
-    var parentLabel = el.closest('label');
-    if (parentLabel) {
-      var text = normalizeText(parentLabel.textContent || '', 40);
-      if (text) return { selector: 'label=' + text, strategy: 'label' };
+    // getByLabel — обёртка <label>
+    var pLbl = el.closest('label');
+    if (pLbl) {
+      var t = norm(pLbl.textContent, 60);
+      if (t) return { pw: 'page.getByLabel("' + esc(t) + '")', strategy: 'label' };
+    }
+    // getByPlaceholder
+    var ph = el.getAttribute('placeholder');
+    if (ph) return { pw: 'page.getByPlaceholder("' + esc(ph) + '")', strategy: 'placeholder' };
+
+    // getByAltText
+    if (el.tagName === 'IMG') {
+      var alt = el.getAttribute('alt');
+      if (alt) return { pw: 'page.getByAltText("' + esc(alt) + '")', strategy: 'alt' };
+    }
+    // getByTitle
+    var title = el.getAttribute('title');
+    if (title) return { pw: 'page.getByTitle("' + esc(title) + '")', strategy: 'title' };
+
+    // getByText
+    var txt = norm(el.innerText || el.textContent, 60);
+    if (txt && txt.length > 1) return { pw: 'page.getByText("' + esc(txt) + '")', strategy: 'text' };
+
+    return null;
+  }
+
+  // ─── P4: locator([name=]) ─────────────────────────────────────────────────────
+
+  function tryName(el) {
+    var n = el.getAttribute('name');
+    if (n) return { pw: 'page.locator("[name=\\"' + esc(n) + '\\"]")', strategy: 'name' };
+    return null;
+  }
+
+  // ─── P5: locator(tag.semantic-class) — только НЕ Tailwind-классы ──────────────
+
+  function tryClass(el) {
+    var tag = el.tagName.toLowerCase();
+    // Семантический класс на самом элементе
+    var cls = semClass(el);
+    if (cls) return { pw: 'page.locator("' + tag + '.' + cls + '")', strategy: 'class' };
+    // Ищем в родителях (до 3 уровней)
+    var cur = el.parentElement;
+    var depth = 0;
+    while (cur && cur !== document.body && depth < 3) {
+      var pCls = semClass(cur);
+      if (pCls) {
+        var pTag = cur.tagName.toLowerCase();
+        return { pw: 'page.locator("' + pTag + '.' + pCls + ' ' + tag + '")', strategy: 'parent-class' };
+      }
+      cur = cur.parentElement;
+      depth++;
     }
     return null;
   }
 
-  /**
-   * Стратегия 4: placeholder — подходит для input/textarea.
-   * Возвращает [placeholder="value"].
-   */
-  function tryPlaceholder(el) {
-    var val = el.getAttribute('placeholder');
-    if (val) {
-      return { selector: '[placeholder="' + escapeCss(val) + '"]', strategy: 'placeholder' };
+  // ─── CSS-selector ────────────────────────────────────────────────────────────
+  // Priority:
+  //   1. Custom data-attr / stable-id / semantic-class on element itself
+  //   2. name / placeholder / aria-label / input[type]
+  //   3. tag:has-text("...") — button, a, h1-h6, p, span, li, label (no anchor needed)
+  //   4. Walk ancestors up to 4 levels:
+  //      a) custom-attr on ancestor  -> [attr="val"] tag[:has-text]
+  //      b) stable id on ancestor    -> tag#id tag[:has-text]
+  //      c) semantic class on ancestor -> div.card tag[:has-text]
+  //      d) ancestor IS button/a/h* with text -> button:has-text("X") child-tag
+  //   5. bare tag as last resort
+
+  function buildCss(el) {
+    var tag = el.tagName.toLowerCase();
+    var TT  = ['button','a','h1','h2','h3','h4','h5','h6','p','span','li','td','th','label'];
+
+    // 1a. custom data-attrs
+    for (var i = 0; i < ATTRS.length; i++) {
+      var av = el.getAttribute(ATTRS[i]);
+      if (av) return '[' + ATTRS[i] + '="' + esc(av) + '"]';
     }
-    return null;
-  }
-
-  /**
-   * Стратегия 5: innerText — текстовый контент элемента.
-   * Используется как последний семантический вариант перед XPath-fallback.
-   * Текст обрезается до 40 символов.
-   */
-  function tryText(el) {
-    var text = normalizeText(el.innerText || el.textContent || '', 40);
-    if (text && text.length > 1) {
-      return { selector: 'text=' + text, strategy: 'text' };
+    // 1b. stable id
+    var elId = el.getAttribute('id');
+    if (isStableId(elId)) return tag + '#' + esc(elId);
+    // 1c. semantic class on element itself
+    var elCls = semClass(el);
+    if (elCls) return tag + '.' + elCls;
+    // 2a. name / placeholder / aria-label
+    var nm = el.getAttribute('name');
+    if (nm) return tag + '[name="' + esc(nm) + '"]';
+    var ph = el.getAttribute('placeholder');
+    if (ph) return tag + '[placeholder="' + esc(ph) + '"]';
+    var al = el.getAttribute('aria-label');
+    if (al) return tag + '[aria-label="' + esc(al) + '"]';
+    // 2b. input[type]
+    if (tag === 'input') {
+      var tp = el.getAttribute('type');
+      return (tp && tp !== 'text') ? 'input[type="' + esc(tp) + '"]' : 'input';
     }
-    return null;
-  }
+    // 3. tag:has-text — for text-bearing elements (no parent needed)
+    if (TT.indexOf(tag) >= 0) {
+      var elTxt = norm(el.innerText || el.textContent, 40);
+      if (elTxt && elTxt.length > 1) return tag + ':has-text("' + esc(elTxt) + '")';
+    }
+    // 4. walk ancestors up to 4 levels
+    var cur = el.parentElement;
+    var d = 0;
+    while (cur && cur !== document.body && d < 4) {
+      var pTag = cur.tagName.toLowerCase();
+      var childTxt    = norm(el.innerText || el.textContent, 30);
+      var hasChildTxt = childTxt && childTxt.length > 1 && TT.indexOf(tag) >= 0;
 
-  // ─── Fallback: Smart XPath ───────────────────────────────────────────────────
-
-  /**
-   * Строит стабильный XPath от ближайшего предка с id или data-testid.
-   * Алгоритм:
-   *   1. Поднимаемся по parentElement вверх до элемента с id/data-testid.
-   *   2. Собираем путь от этого предка до целевого элемента.
-   *   3. Пропускаем теги div/span/section/article без атрибутов (структурный шум).
-   *   4. Если стабильный предок не найден — строим XPath от <body>.
-   */
-  function buildFallbackXPath(el) {
-    var parts = [];
-    var current = el;
-
-    // Строим путь снизу вверх до стабильного предка
-    while (current && current !== document.body) {
-      var tag = current.tagName.toLowerCase();
-      var testId = current.getAttribute('data-testid');
-      var id = current.getAttribute('id');
-
-      if (testId) {
-        // Нашли стабильный предок — завершаем подъём
-        parts.unshift('//*[@data-testid="' + escapeCss(testId) + '"]');
-        break;
-      } else if (id) {
-        parts.unshift('//*[@id="' + escapeCss(id) + '"]');
-        break;
-      } else {
-        // Определяем позицию среди siblings с тем же тегом
-        var siblings = current.parentElement
-          ? Array.prototype.slice.call(current.parentElement.children).filter(function (s) {
-              return s.tagName === current.tagName;
-            })
-          : [];
-        var index = siblings.length > 1 ? siblings.indexOf(current) + 1 : null;
-
-        // Пропускаем структурные div/span без значимых атрибутов
-        var isNoise = ['div', 'span', 'section', 'article', 'main', 'header', 'footer'].includes(tag)
-          && !current.getAttribute('class')
-          && !current.getAttribute('role');
-
-        if (!isNoise || current === el) {
-          parts.unshift(tag + (index ? '[' + index + ']' : ''));
+      // 4a. custom attr on ancestor
+      for (var j = 0; j < ATTRS.length; j++) {
+        var pav = cur.getAttribute(ATTRS[j]);
+        if (pav) {
+          var anch = '[' + ATTRS[j] + '="' + esc(pav) + '"]';
+          return hasChildTxt ? anch + ' ' + tag + ':has-text("' + esc(childTxt) + '")' : anch + ' ' + tag;
         }
+      }
+      // 4b. stable id on ancestor
+      var pid = cur.getAttribute('id');
+      if (isStableId(pid)) {
+        var anch = pTag + '#' + esc(pid);
+        return hasChildTxt ? anch + ' ' + tag + ':has-text("' + esc(childTxt) + '")' : anch + ' ' + tag;
+      }
+      // 4c. semantic class on ancestor (div.card, section.hero, nav.menu, etc.)
+      var pcls = semClass(cur);
+      if (pcls) {
+        var anch = pTag + '.' + pcls;
+        return hasChildTxt ? anch + ' ' + tag + ':has-text("' + esc(childTxt) + '")' : anch + ' ' + tag;
+      }
+      // 4d. ancestor IS button/a/h* with its own text (up to 2 levels deep)
+      if (d <= 1) {
+        var AT = ['button','a','h1','h2','h3','h4','h5','h6'];
+        if (AT.indexOf(pTag) >= 0) {
+          var pt = norm(cur.innerText || cur.textContent, 30);
+          if (pt && pt.length > 1) return pTag + ':has-text("' + esc(pt) + '") ' + tag;
+        }
+      }
+      cur = cur.parentElement; d++;
+    }
+    return tag;
+  }
 
-        current = current.parentElement;
+  // ─── XPath ───────────────────────────────────────────────────────────────────
+  // Rules:
+  //   FAST PATH: button/a/h*/p/span with visible text
+  //     -> //button[normalize-space()="Submit"]  (most stable, no traversal)
+  //   HARD ANCHOR: id / custom-data-attr found within 8 levels
+  //     -> //*[@id="form"]/input[2]
+  //   SOFT ANCHOR: non-Tailwind semantic class found within 8 levels
+  //     -> //div[contains(@class,"card")]/span
+  //   POSITIONAL: tag + sibling-index in intermediate path nodes (NO classes)
+  //   Returns '' only when absolutely nothing stable is found.
+
+  function buildXPath(el) {
+    var tag      = el.tagName.toLowerCase();
+    var TEXTABLE = ['button','a','h1','h2','h3','h4','h5','h6','p','span','li','label','td'];
+
+    // ── Fast path 1: кастомный data-атрибут на самом элементе ────────────────
+    for (var fi = 0; fi < ATTRS.length; fi++) {
+      var fav = el.getAttribute(ATTRS[fi]);
+      if (fav) return '//*[@' + ATTRS[fi] + '="' + esc(fav) + '"]';
+    }
+
+    // ── Fast path 2: stable id на самом элементе ──────────────────────────────
+    var eid = el.getAttribute('id');
+    if (isStableId(eid)) return '//' + tag + '[@id="' + esc(eid) + '"]';
+
+    // ── Fast path 3: placeholder ───────────────────────────────────────────────
+    var ph = el.getAttribute('placeholder');
+    if (ph) return '//' + tag + '[@placeholder="' + esc(ph) + '"]';
+
+    // ── Fast path 4: aria-label ────────────────────────────────────────────────
+    var al = el.getAttribute('aria-label');
+    if (al) return '//' + tag + '[@aria-label="' + esc(al) + '"]';
+
+    // ── Fast path 5: name-атрибут (input, select, textarea) ───────────────────
+    var nm = el.getAttribute('name');
+    if (nm) return '//' + tag + '[@name="' + esc(nm) + '"]';
+
+    // ── Fast path 6: видимый текст (button, a, h*, p, span, li...) ────────────
+    if (TEXTABLE.indexOf(tag) >= 0) {
+      var ftxt = norm(el.innerText || el.textContent, 60);
+      if (ftxt && ftxt.length > 1) {
+        return '//' + tag + '[normalize-space()="' + esc(ftxt) + '"]';
       }
     }
 
-    // Если не нашли стабильного предка, корневой элемент — body
-    if (parts.length === 0 || !parts[0].startsWith('//*[')) {
-      parts.unshift('//body');
+    // ── Fast path 7: семантический класс на самом элементе ────────────────────
+    var ownCls = semClass(el);
+    if (ownCls) return '//' + tag + '[contains(@class,"' + ownCls + '")]';
+
+    // ── Anchor walk: ищем ближайшего предка со стабильным якорем ─────────────
+    // Строим короткий путь от якоря до элемента (без позиционных цепочек).
+    var segments = [];
+    var cur      = el;
+    var depth    = 0;
+
+    while (cur && cur !== document.body && depth < 8) {
+      var cTag = cur.tagName.toLowerCase();
+
+      // Hard anchor: custom data-attr на предке
+      for (var i = 0; i < ATTRS.length; i++) {
+        var av = cur.getAttribute(ATTRS[i]);
+        if (av) {
+          segments.unshift('//*[@' + ATTRS[i] + '="' + esc(av) + '"]');
+          return segments.join('/');
+        }
+      }
+      // Hard anchor: stable id на предке
+      var xid = cur.getAttribute('id');
+      if (isStableId(xid)) {
+        segments.unshift('//*[@id="' + esc(xid) + '"]');
+        return segments.join('/');
+      }
+      // Soft anchor: placeholder на предке (маловероятно, но бывает)
+      if (depth > 0) {
+        var xph = cur.getAttribute('placeholder');
+        if (xph) {
+          segments.unshift('//' + cTag + '[@placeholder="' + esc(xph) + '"]');
+          return segments.join('/');
+        }
+        // Soft anchor: semantic class на предке
+        var xcls = semClass(cur);
+        if (xcls) {
+          // Если остался только один уровень вложения — используем прямой тег,
+          // иначе используем /descendant:: чтобы не строить длинную позиционную цепочку
+          if (segments.length <= 1) {
+            segments.unshift('//' + cTag + '[contains(@class,"' + xcls + '")]');
+          } else {
+            // Сбрасываем позиционные сегменты — используем descendant
+            var lastSeg = segments[segments.length - 1];
+            segments = ['//' + cTag + '[contains(@class,"' + xcls + '")]//' + lastSeg];
+          }
+          return segments.join('/');
+        }
+      }
+
+      // Промежуточный узел: добавляем тег + позиционный индекс
+      // НО только если уже нашли хоть один нижний сегмент (depth > 0)
+      if (depth > 0) {
+        var sibs = cur.parentElement
+          ? Array.prototype.slice.call(cur.parentElement.children)
+              .filter(function (s) { return s.tagName === cur.tagName; })
+          : [];
+        var idx = sibs.length > 1 ? '[' + (sibs.indexOf(cur) + 1) + ']' : '';
+        segments.unshift(cTag + idx);
+      } else {
+        // Первый шаг — сам элемент
+        var sibs0 = cur.parentElement
+          ? Array.prototype.slice.call(cur.parentElement.children)
+              .filter(function (s) { return s.tagName === cur.tagName; })
+          : [];
+        var idx0 = sibs0.length > 1 ? '[' + (sibs0.indexOf(cur) + 1) + ']' : '';
+        segments.unshift(cTag + idx0);
+      }
+
+      cur = cur.parentElement;
+      depth++;
     }
 
-    return parts.join('/');
+    // Если путь слишком длинный (> 3 сегментов) и нет якоря — не возвращаем мусор
+    if (segments.length > 3) return '';
+
+    return segments.length > 0 ? '//' + segments.join('/') : '';
   }
 
-  // ─── Главный обработчик Alt+Click ───────────────────────────────────────────
+  // ─── Главный обработчик Alt+Click ────────────────────────────────────────────
 
-  /**
-   * Обрабатывает клик с зажатым Alt.
-   * Capture-фаза гарантирует перехват до любых обработчиков приложения.
-   * composedPath()[0] возвращает реальный целевой элемент даже внутри Shadow DOM.
-   */
   function handleAltClick(event) {
     if (!event.altKey) return;
-
-    // Предотвращаем стандартное поведение браузера (переход по ссылке, фокус и т.д.)
     event.preventDefault();
     event.stopPropagation();
 
-    // Резолвим реальный элемент через composedPath для поддержки Shadow DOM
+    // Shadow DOM: composedPath()[0] даёт реальный целевой элемент
     var path = event.composedPath();
-    var target = path && path.length > 0 ? path[0] : event.target;
-
+    var target = (path && path.length > 0) ? path[0] : event.target;
     if (!target || target === document || target === window) return;
 
-    // Подсвечиваем выбранный элемент
-    highlightElement(target);
+    highlight(target);
 
-    // Применяем стратегии по цепочке приоритетов
-    var result = tryDataTestId(target)
+    // P1 -> P2 -> P3 -> P4 -> P5
+    var result = tryTestId(target)
       || tryRole(target)
-      || tryLabel(target)
-      || tryPlaceholder(target)
       || tryText(target)
+      || tryName(target)
+      || tryClass(target)
       || null;
 
-    // XPath fallback если ни одна семантическая стратегия не сработала
-    var xpathValue = buildFallbackXPath(target);
-
-    if (!result) {
-      result = { selector: xpathValue, strategy: 'xpath-fallback' };
-    }
+    var css   = buildCss(target);
+    var xpath = buildXPath(target);
+    var pw    = result ? result.pw : 'page.locator("' + esc(css) + '")';
+    var strat = result ? result.strategy : 'css-fallback';
 
     var payload = {
-      selector: result.selector,
-      strategy: result.strategy,
-      xpath: xpathValue,
+      playwrightLocator: pw,
+      cssSelector: css,
+      xpath: xpath,
+      strategy: strat,
       tagName: target.tagName.toLowerCase()
     };
 
-    // Отправляем результат на Node.js-сторону через exposeFunction
     if (typeof window.onLocatorGenerated === 'function') {
       window.onLocatorGenerated(payload);
     }
 
-    // Копируем локатор в буфер обмена (без выброса исключений при отказе)
+    // Копируем Playwright-локатор в буфер обмена
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(result.selector).catch(function () {
-        // Буфер обмена недоступен (headless / нет разрешений) — молча игнорируем
-      });
+      navigator.clipboard.writeText(pw).catch(function () {});
     }
   }
 
-  // Регистрируем обработчик в capture-фазе для перехвата до приложения
   document.addEventListener('click', handleAltClick, true);
-
-  // Визуальная подсказка в консоли браузера (видна в DevTools)
-  console.log('[SmartInspector] ✅ Activated. Hold Alt and click any element to inspect its locator.');
+  console.log('[SmartInspector] ✅ Activated. Alt+Click any element to inspect locators.');
 })();
 `;
 
