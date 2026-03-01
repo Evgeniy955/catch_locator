@@ -49,12 +49,6 @@ test.use({
 
 test('🔍 Manual Inspector — onlytests.io text-generator', async ({ page }) => {
 
-  page.on('console', msg => {
-    const text = msg.text();
-    if (text.includes('[SmartInspector]') || text.includes('[Inspector]')) {
-      console.log(`\n  ${text}`);
-    }
-  });
 
   console.log('\n' + '═'.repeat(62));
   console.log('  🚀 Открываем:', TARGET_URL);
@@ -93,12 +87,6 @@ test('🔍 Manual Inspector — onlytests.io text-generator', async ({ page }) =
 
 test('📝 Demo — разведка элементов onlytests.io', async ({ page }) => {
 
-  page.on('console', msg => {
-    const text = msg.text();
-    if (text.includes('[SmartInspector]') || text.includes('[Inspector]')) {
-      console.log(`\n  ${text}`);
-    }
-  });
 
   await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle');

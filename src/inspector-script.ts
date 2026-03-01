@@ -296,16 +296,45 @@ export const inspectorScript: string = `
   //   Returns '' only when absolutely nothing stable is found.
 
   function buildXPath(el) {
+    var tag      = el.tagName.toLowerCase();
     var TEXTABLE = ['button','a','h1','h2','h3','h4','h5','h6','p','span','li','label','td'];
 
-    // Fast path: textable element with unique visible text — best possible XPath
-    if (TEXTABLE.indexOf(el.tagName.toLowerCase()) >= 0) {
+    // ── Fast path 1: кастомный data-атрибут на самом элементе ────────────────
+    for (var fi = 0; fi < ATTRS.length; fi++) {
+      var fav = el.getAttribute(ATTRS[fi]);
+      if (fav) return '//*[@' + ATTRS[fi] + '="' + esc(fav) + '"]';
+    }
+
+    // ── Fast path 2: stable id на самом элементе ──────────────────────────────
+    var eid = el.getAttribute('id');
+    if (isStableId(eid)) return '//' + tag + '[@id="' + esc(eid) + '"]';
+
+    // ── Fast path 3: placeholder ───────────────────────────────────────────────
+    var ph = el.getAttribute('placeholder');
+    if (ph) return '//' + tag + '[@placeholder="' + esc(ph) + '"]';
+
+    // ── Fast path 4: aria-label ────────────────────────────────────────────────
+    var al = el.getAttribute('aria-label');
+    if (al) return '//' + tag + '[@aria-label="' + esc(al) + '"]';
+
+    // ── Fast path 5: name-атрибут (input, select, textarea) ───────────────────
+    var nm = el.getAttribute('name');
+    if (nm) return '//' + tag + '[@name="' + esc(nm) + '"]';
+
+    // ── Fast path 6: видимый текст (button, a, h*, p, span, li...) ────────────
+    if (TEXTABLE.indexOf(tag) >= 0) {
       var ftxt = norm(el.innerText || el.textContent, 60);
       if (ftxt && ftxt.length > 1) {
-        return '//' + el.tagName.toLowerCase() + '[normalize-space()="' + esc(ftxt) + '"]';
+        return '//' + tag + '[normalize-space()="' + esc(ftxt) + '"]';
       }
     }
 
+    // ── Fast path 7: семантический класс на самом элементе ────────────────────
+    var ownCls = semClass(el);
+    if (ownCls) return '//' + tag + '[contains(@class,"' + ownCls + '")]';
+
+    // ── Anchor walk: ищем ближайшего предка со стабильным якорем ─────────────
+    // Строим короткий путь от якоря до элемента (без позиционных цепочек).
     var segments = [];
     var cur      = el;
     var depth    = 0;
@@ -313,7 +342,7 @@ export const inspectorScript: string = `
     while (cur && cur !== document.body && depth < 8) {
       var cTag = cur.tagName.toLowerCase();
 
-      // Hard anchor: custom data-attr
+      // Hard anchor: custom data-attr на предке
       for (var i = 0; i < ATTRS.length; i++) {
         var av = cur.getAttribute(ATTRS[i]);
         if (av) {
@@ -321,32 +350,60 @@ export const inspectorScript: string = `
           return segments.join('/');
         }
       }
-      // Hard anchor: stable id
+      // Hard anchor: stable id на предке
       var xid = cur.getAttribute('id');
       if (isStableId(xid)) {
         segments.unshift('//*[@id="' + esc(xid) + '"]');
         return segments.join('/');
       }
-      // Soft anchor: semantic (non-Tailwind) class — only when path below exists
+      // Soft anchor: placeholder на предке (маловероятно, но бывает)
       if (depth > 0) {
+        var xph = cur.getAttribute('placeholder');
+        if (xph) {
+          segments.unshift('//' + cTag + '[@placeholder="' + esc(xph) + '"]');
+          return segments.join('/');
+        }
+        // Soft anchor: semantic class на предке
         var xcls = semClass(cur);
         if (xcls) {
-          segments.unshift('//' + cTag + '[contains(@class,"' + xcls + '")]');
+          // Если остался только один уровень вложения — используем прямой тег,
+          // иначе используем /descendant:: чтобы не строить длинную позиционную цепочку
+          if (segments.length <= 1) {
+            segments.unshift('//' + cTag + '[contains(@class,"' + xcls + '")]');
+          } else {
+            // Сбрасываем позиционные сегменты — используем descendant
+            var lastSeg = segments[segments.length - 1];
+            segments = ['//' + cTag + '[contains(@class,"' + xcls + '")]//' + lastSeg];
+          }
           return segments.join('/');
         }
       }
 
-      // Intermediate node: tag + positional index among same-tag siblings (NO classes)
-      var sibs = cur.parentElement
-        ? Array.prototype.slice.call(cur.parentElement.children)
-            .filter(function (s) { return s.tagName === cur.tagName; })
-        : [];
-      var idx = sibs.length > 1 ? '[' + (sibs.indexOf(cur) + 1) + ']' : '';
-      segments.unshift(cTag + idx);
+      // Промежуточный узел: добавляем тег + позиционный индекс
+      // НО только если уже нашли хоть один нижний сегмент (depth > 0)
+      if (depth > 0) {
+        var sibs = cur.parentElement
+          ? Array.prototype.slice.call(cur.parentElement.children)
+              .filter(function (s) { return s.tagName === cur.tagName; })
+          : [];
+        var idx = sibs.length > 1 ? '[' + (sibs.indexOf(cur) + 1) + ']' : '';
+        segments.unshift(cTag + idx);
+      } else {
+        // Первый шаг — сам элемент
+        var sibs0 = cur.parentElement
+          ? Array.prototype.slice.call(cur.parentElement.children)
+              .filter(function (s) { return s.tagName === cur.tagName; })
+          : [];
+        var idx0 = sibs0.length > 1 ? '[' + (sibs0.indexOf(cur) + 1) + ']' : '';
+        segments.unshift(cTag + idx0);
+      }
 
       cur = cur.parentElement;
       depth++;
     }
+
+    // Если путь слишком длинный (> 3 сегментов) и нет якоря — не возвращаем мусор
+    if (segments.length > 3) return '';
 
     return segments.length > 0 ? '//' + segments.join('/') : '';
   }
