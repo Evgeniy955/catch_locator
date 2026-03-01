@@ -82,10 +82,27 @@ export default defineConfig({
 });
 ```
 
-### 3. Запустите в headed-режиме
+### 3. Запустите инспектор
+
+**Вариант А — мини-тест `inspect.spec.ts` (рекомендуется):**
 
 ```bash
-npx playwright test --headed
+npm run inspect
+```
+
+Откроется браузер только с одним тестом-инспектором. Не затрагивает остальные тесты проекта.
+
+**Вариант Б — конкретный тест из вашего проекта:**
+
+```bash
+# Запустить один файл с тестом
+npx playwright test tests/my-test.spec.ts --headed
+
+# Запустить один тест по названию
+npx playwright test --headed --grep "название теста"
+
+# Запустить один тест по названию в конкретном файле
+npx playwright test tests/my-test.spec.ts --headed --grep "название теста"
 ```
 
 Зажмите `Alt` и кликните на любой элемент — локаторы появятся в терминале.
@@ -287,30 +304,80 @@ interface SmartInspectorOptions {
 
 ## Ручное тестирование
 
-### Настройка
+### Вариант 1 — мини-тест `inspect.spec.ts` (не затрагивает ваши тесты)
 
-Отредактируйте `tests/inspector.config.ts`:
+Скопируйте файл `tests/inspect.spec.ts` в свой проект, укажите URL и запустите:
+
+```typescript
+// inspect.spec.ts — меняйте только эти две переменные:
+
+const TARGET_URL = 'https://your-project.com/page-to-inspect';
+
+const LOCATOR_ATTRIBUTES = [
+  'data-testid',
+  'data-cy',     // если используете Cypress-атрибуты
+  'data-qa',
+];
+```
+
+```bash
+# Запустить мини-тест инспектора
+npm run inspect
+
+# Или напрямую через Playwright
+npx playwright test tests/inspect.spec.ts --headed
+```
+
+---
+
+### Вариант 2 — запустить конкретный тест из вашего проекта
+
+Если хотите исследовать страницу в контексте уже существующего теста:
+
+```bash
+# Один файл целиком
+npx playwright test tests/checkout.spec.ts --headed
+
+# Один тест по названию (частичное совпадение)
+npx playwright test --headed --grep "checkout page"
+
+# Один тест по названию в конкретном файле
+npx playwright test tests/checkout.spec.ts --headed --grep "checkout page"
+
+# С конкретным браузером
+npx playwright test tests/checkout.spec.ts --headed --project=chromium
+```
+
+> 💡 Замените импорт в тест-файле на `playwright-smart-inspector` — инспектор активируется автоматически без других изменений.
+
+---
+
+### Настройка `tests/inspector.config.ts`
 
 ```typescript
 export const INSPECTOR_CONFIG = {
-  targetUrl: 'https://your-project.com/page-to-inspect',
-  locatorAttributes: ['data-cy', 'data-testid'],
+  targetUrl: 'https://your-project.com',
+  locatorAttributes: [
+    'data-testid',
+    'data-test-id',
+    'data-e2e',
+    'test-id',
+    // 'data-cy',
+    // 'data-qa',
+  ],
 };
 ```
 
-### Запуск
+### Доступные скрипты
 
 ```bash
-# Открыть браузер и исследовать элементы
-npm run test:manual
-
-# Только демо-тест (разведка элементов на странице)
-npm run test:manual:demo
+npm run inspect            # мини-тест поиска локаторов (tests/inspect.spec.ts)
+npm run test:manual        # полный ручной тест (tests/manual-inspector.spec.ts)
+npm run test:manual:demo   # только Demo-тест (разведка элементов страницы)
 ```
 
 ### Обновление библиотеки
 
-После изменений в репозитории — обновить в рабочем проекте:
 
 ```bash
 npm install --save-dev github:Evgeniy955/catch_locator#master
@@ -381,8 +448,9 @@ src/
 └── index.ts                — главный модуль (test.extend, exposeFunction, Self-Healing)
 
 tests/
+├── inspect.spec.ts         — ⭐ мини-тест для быстрого поиска локаторов (менять только URL)
 ├── inspector.config.ts     — настройка URL и локаторов для ручного тестирования
-└── manual-inspector.spec.ts — тест для ручной проверки библиотеки
+└── manual-inspector.spec.ts — полный тест с разведкой интерактивных элементов
 
 dist/                       — скомпилированный JS + .d.ts (коммитится в Git)
 ├── index.js / index.d.ts

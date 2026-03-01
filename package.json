@@ -12,8 +12,12 @@
     "build": "tsc -p tsconfig.build.json",
     "prepare": "tsc -p tsconfig.build.json",
     "prepublishOnly": "tsc -p tsconfig.build.json",
-    "test:manual": "playwright test",
-    "test:manual:demo": "playwright test --grep \"Demo\""
+
+    "inspect": "playwright test tests/inspect.spec.ts",
+    "inspect:url": "playwright test tests/inspect.spec.ts",
+
+    "test:manual": "playwright test tests/manual-inspector.spec.ts",
+    "test:manual:demo": "playwright test tests/manual-inspector.spec.ts --grep \"Demo\""
   },
   "repository": {
     "type": "git",

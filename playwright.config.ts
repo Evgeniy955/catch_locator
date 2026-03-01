@@ -1,15 +1,21 @@
 import { defineConfig } from '@playwright/test';
 
 /**
- * playwright.config.ts — основной конфиг, подхватывается IDE (WebStorm/VS Code)
- * при запуске тестов кнопкой ▶ напрямую из редактора.
+ * playwright.config.ts — конфиг для ручного тестирования библиотеки.
  *
- * Для запуска из терминала:
- *   npm run test:manual
+ * Запуск конкретного теста:
+ *   npm run inspect                        — мини-тест поиска локаторов
+ *   npm run test:manual                    — полный ручной тест
+ *   npm run test:manual:demo               — только Demo-тест
+ *
+ * Запуск с произвольным URL (без изменения файла):
+ *   INSPECT_URL=https://example.com npm run inspect
+ *
+ * Запуск конкретного теста по имени из любого проекта:
+ *   npx playwright test --headed --grep "название теста"
  */
 export default defineConfig({
   testDir: './tests',
-  testMatch: '**/manual-inspector.spec.ts',
   fullyParallel: false,
   retries: 0,
   workers: 1,
@@ -29,4 +35,3 @@ export default defineConfig({
     },
   ],
 });
-
