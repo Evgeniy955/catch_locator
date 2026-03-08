@@ -41,6 +41,8 @@ export interface SmartInspectorFixtures {
 export interface LocatorPayload {
   /** Лучший Playwright-локатор по приоритету стратегий */
   playwrightLocator: string;
+  /** Дополнительный locator(tag).nth(index), не зависящий от текста */
+  indexBasedLocator: string;
   /** Стабильный CSS-селектор (без позиционных div[2]/span[1]) */
   cssSelector: string;
   /** XPath от ближайшего стабильного предка — НЕ от корня документа */

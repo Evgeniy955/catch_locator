@@ -144,13 +144,14 @@ exports.test = test_1.test.extend({
             // activationKey замыкается из внешнего scope — используется в подсказке.
             const keyLabel = activationKey.charAt(0).toUpperCase() + activationKey.slice(1);
             await page.exposeFunction('onLocatorGenerated', (payload) => {
-                const dedupeKey = `${payload.playwrightLocator}|${payload.cssSelector}|${payload.xpath}`;
+                const dedupeKey = `${payload.playwrightLocator}|${payload.indexBasedLocator}|${payload.cssSelector}|${payload.xpath}`;
                 if (!shouldPrintLocatorEvent(dedupeKey))
                     return;
                 console.log('\n' + '═'.repeat(62));
                 console.log(`[Inspector] 📍 Element: <${payload.tagName}>  Strategy: ${payload.strategy}`);
                 console.log('─'.repeat(62));
                 console.log(`  Playwright  : ${payload.playwrightLocator}`);
+                console.log(`  By index    : ${payload.indexBasedLocator}`);
                 console.log(`  CSS         : ${payload.cssSelector}`);
                 if (payload.xpath) {
                     console.log(`  XPath       : ${payload.xpath}`);
