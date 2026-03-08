@@ -2,6 +2,18 @@
 
 ---
 
+## Клавиша активации по платформе
+
+| Платформа | Клавиша | Примечание |
+|---|---|---|
+| **Windows / Linux** | `Alt+Click` | Стандартная работа |
+| **macOS** | `Ctrl+Click` | `Alt/Option` перехватывается системой браузера на Mac |
+
+Клавиша определяется **автоматически** — ничего настраивать не нужно.  
+Для ручного переопределения используйте `activationKey` в опциях (см. ниже).
+
+---
+
 ## Быстрый старт — `inspect.spec.ts`
 
 Это мини-тест для поиска локаторов на любой странице.  
@@ -22,6 +34,10 @@ const LOCATOR_ATTRIBUTES = [
   'data-qa',
   'data-e2e',
 ];
+
+// activationKey не нужен — определится автоматически:
+//   macOS        → Ctrl+Click
+//   Windows/Linux → Alt+Click
 ```
 
 ### 2. Запустите
@@ -32,7 +48,8 @@ npm run inspect
 
 ### 3. Используйте инспектор в браузере
 
-- Зажмите **`Alt`** и кликните на любой элемент
+- **Windows/Linux:** зажмите **`Alt`** и кликните на любой элемент
+- **macOS:** зажмите **`Ctrl`** и кликните на любой элемент
 - Элемент подсветится красной рамкой
 - В терминале появятся локаторы:
 
@@ -45,6 +62,7 @@ npm run inspect
   XPath       : //button[normalize-space()="Генерировать"]
 ──────────────────────────────────────────────────────────────
   📋 Copied   : page.getByRole("button", { name: "Генерировать" })
+  💡 Tip      : Alt+Click to inspect next element
 ══════════════════════════════════════════════════════════════
 ```
 
@@ -114,6 +132,12 @@ test.use({
   smartInspector: {
     enabled: true,
     locatorAttributes: LOCATOR_ATTRIBUTES,
+    // activationKey не указан → определится автоматически:
+    //   macOS         → 'ctrl'  (Ctrl+Click)
+    //   Windows/Linux → 'alt'   (Alt+Click)
+    //
+    // Переопределить явно (если нужно):
+    // activationKey: 'ctrl',
   },
 });
 
@@ -143,4 +167,3 @@ npx playwright test tests/inspect.spec.ts --headed
 | **P5** | `locator(tag.class)` | `page.locator("button.submit-btn")` |
 
 > Подробнее — см. [README.md](./README.md)
-
