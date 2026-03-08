@@ -136,7 +136,10 @@ exports.test = test_1.test.extend({
             // Явно заданный activationKey всегда имеет приоритет.
             const activationKey = smartInspector.activationKey ??
                 (process.platform === 'darwin' ? 'meta' : 'alt');
-            const keyLabel = activationKey.charAt(0).toUpperCase() + activationKey.slice(1);
+            // Показываем человеку привычное название клавиши на macOS.
+            const keyLabel = activationKey === 'meta' && process.platform === 'darwin'
+                ? 'Cmd'
+                : activationKey.charAt(0).toUpperCase() + activationKey.slice(1);
             const configScript = `window.__smartInspectorConfig = ${JSON.stringify({ locatorAttributes, activationKey })};`;
             // Инжектируем конфиг/инспектор на весь context: текущая вкладка + все новые popups/tabs.
             await context.addInitScript(configScript);

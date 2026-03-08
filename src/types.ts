@@ -19,10 +19,10 @@ export interface SmartInspectorOptions {
    *
    * Рекомендации по платформам:
    *   - Windows / Linux : 'alt'  (Alt+Click)
-   *   - macOS           : 'ctrl' (Ctrl+Click) — Alt/Option на Mac перехватывается системой
+   *   - macOS           : 'meta' (Cmd+Click)
    *
    * Если не задано — определяется автоматически:
-   *   macOS → 'ctrl', остальные → 'alt'
+   *   macOS → 'meta', остальные → 'alt'
    *
    * Допустимые значения: 'alt' | 'ctrl' | 'shift' | 'meta'
    */

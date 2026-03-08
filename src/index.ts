@@ -150,7 +150,10 @@ export const test = base.extend<SmartInspectorFixtures>({
         smartInspector.activationKey ??
         (process.platform === 'darwin' ? 'meta' : 'alt');
 
-      const keyLabel = activationKey.charAt(0).toUpperCase() + activationKey.slice(1);
+      // Показываем человеку привычное название клавиши на macOS.
+      const keyLabel = activationKey === 'meta' && process.platform === 'darwin'
+        ? 'Cmd'
+        : activationKey.charAt(0).toUpperCase() + activationKey.slice(1);
       const configScript =
         `window.__smartInspectorConfig = ${JSON.stringify({ locatorAttributes, activationKey })};`;
 
