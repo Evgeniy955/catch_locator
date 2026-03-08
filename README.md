@@ -1,6 +1,6 @@
 # playwright-smart-inspector
 
-> Расширение `@playwright/test` с интерактивным браузерным инспектором локаторов (`Alt+Click`) и механизмом **Self-Healing** — автоматического предложения альтернативных локаторов при падении тестов.
+> Расширение `@playwright/test` с интерактивным браузерным инспектором локаторов и механизмом **Self-Healing** — автоматического предложения альтернативных локаторов при падении тестов.
 
 ---
 
@@ -9,7 +9,7 @@
 - [Возможности](#возможности)
 - [Установка](#установка)
 - [Быстрый старт](#быстрый-старт)
-- [Interactive Inspector (Alt+Click)](#interactive-inspector-altclick)
+- [Interactive Inspector](#interactive-inspector)
 - [Self-Healing](#self-healing)
 - [Конфигурация](#конфигурация)
 - [API](#api)
@@ -22,12 +22,13 @@
 
 | Компонент | Описание |
 |---|---|
-| 🔍 **Interactive Inspector** | Зажмите `Alt` и кликните на любой элемент — библиотека сгенерирует Playwright-локатор, CSS и XPath, скопирует лучший вариант в буфер обмена |
+| 🔍 **Interactive Inspector** | Зажмите модификатор и кликните на элемент — библиотека сгенерирует Playwright-локатор, CSS и XPath, скопирует лучший вариант в буфер обмена |
 | 🛠 **Self-Healing** | При падении теста анализирует DOM и предлагает до 3 альтернативных локаторов с оценкой релевантности |
 | 🌑 **Shadow DOM** | Корректно определяет элементы внутри Shadow DOM через `composedPath()` |
 | ⚡ **Zero config** | Работает из коробки — просто замените импорт `test` |
 | 🔧 **Управляемый** | Отключается per-test через `test.use({ smartInspector: { enabled: false } })` |
 | 🏷 **Кастомные атрибуты** | Настройте свои `data-*` атрибуты (`data-cy`, `data-qa`, `data-e2e`) — они будут проверяться первыми |
+| 🖥 **Кросс-платформенный** | `Alt+Click` на Windows/Linux, `Ctrl+Click` на macOS — определяется автоматически |
 
 ---
 
@@ -105,16 +106,25 @@ npx playwright test --headed --grep "название теста"
 npx playwright test tests/my-test.spec.ts --headed --grep "название теста"
 ```
 
-Зажмите `Alt` и кликните на любой элемент — локаторы появятся в терминале.
+Зажмите клавишу-модификатор и кликните на любой элемент — локаторы появятся в терминале.
 
 ---
 
-## Interactive Inspector (Alt+Click)
+## Interactive Inspector
+
+### Клавиша активации по платформе
+
+| Платформа | Клавиша | Причина |
+|---|---|---|
+| **Windows / Linux** | `Alt+Click` | Стандартная работа |
+| **macOS** | `Ctrl+Click` | `Alt/Option` перехватывается системой браузера на Mac |
+
+Клавиша определяется **автоматически** по `process.platform`. Можно переопределить явно через `activationKey` (см. [Конфигурация](#конфигурация)).
 
 ### Как использовать
 
 1. Запустите тест в **headed-режиме**: `npx playwright test --headed`
-2. В браузере зажмите `Alt` и кликните на любой элемент
+2. В браузере зажмите нужную клавишу (`Alt` или `Ctrl`) и кликните на элемент
 3. Элемент подсветится красной рамкой на 1.5 секунды
 4. В терминале появятся все варианты локаторов
 5. Playwright-локатор **автоматически скопируется** в буфер обмена
@@ -130,6 +140,7 @@ npx playwright test tests/my-test.spec.ts --headed --grep "название те
   XPath       : //textarea[@placeholder="Введите ваш текст здесь..."]
 ──────────────────────────────────────────────────────────────
   📋 Copied   : page.getByPlaceholder("Введите ваш текст здесь...")
+  💡 Tip      : Alt+Click to inspect next element
 ══════════════════════════════════════════════════════════════
 ```
 
@@ -210,24 +221,29 @@ npx playwright test tests/my-test.spec.ts --headed --grep "название те
 
 ## Конфигурация
 
-### `tests/inspector.config.ts` — конфиг для ручного тестирования
+### `SmartInspectorOptions`
 
 ```typescript
-export const INSPECTOR_CONFIG = {
-  // URL целевой страницы
-  targetUrl: 'https://your-project.com',
+interface SmartInspectorOptions {
+  /** Включить/выключить инспектор и Self-Healing. По умолчанию: true */
+  enabled: boolean;
 
-  // Кастомные data-атрибуты вашего проекта (Priority 1)
-  // Проверяются в порядке массива — первый найденный побеждает
-  locatorAttributes: [
-    'data-testid',
-    'data-test-id',
-    'data-e2e',
-    'test-id',
-    // 'data-cy',    // Cypress
-    // 'data-qa',
-  ],
-};
+  /** Кастомные data-атрибуты — Priority 1.
+   *  По умолчанию: ['data-testid', 'data-test-id', 'data-e2e', 'test-id'] */
+  locatorAttributes?: string[];
+
+  /**
+   * Клавиша-модификатор для активации инспектора.
+   *
+   * Если не задана — определяется автоматически:
+   *   macOS  → 'ctrl'  (Ctrl+Click)
+   *   другие → 'alt'   (Alt+Click)
+   *
+   * Переопределить явно:
+   *   'alt' | 'ctrl' | 'shift' | 'meta'
+   */
+  activationKey?: 'alt' | 'ctrl' | 'shift' | 'meta';
+}
 ```
 
 ### Глобально в `playwright.config.ts`
@@ -240,7 +256,20 @@ export default defineConfig({
     smartInspector: {
       enabled: true,
       locatorAttributes: ['data-cy', 'data-qa', 'data-testid'],
+      // activationKey не указан → определяется автоматически по платформе
     },
+  },
+});
+```
+
+### Явно указать клавишу (переопределение)
+
+```typescript
+// Принудительно Ctrl+Click на любой платформе
+test.use({
+  smartInspector: {
+    enabled: true,
+    activationKey: 'ctrl',
   },
 });
 ```
@@ -286,18 +315,8 @@ import { expect } from 'playwright-smart-inspector';
 test('пример', async ({ page, smartInspector }) => {
   console.log(smartInspector.enabled);           // true
   console.log(smartInspector.locatorAttributes); // ['data-testid', ...]
+  console.log(smartInspector.activationKey);     // 'alt' | 'ctrl' | undefined
 });
-```
-
-### `SmartInspectorOptions`
-
-```typescript
-interface SmartInspectorOptions {
-  /** Включить/выключить инспектор и Self-Healing. По умолчанию: true */
-  enabled: boolean;
-  /** Кастомные data-атрибуты — Priority 1. По умолчанию: ['data-testid', 'data-test-id', 'data-e2e', 'test-id'] */
-  locatorAttributes?: string[];
-}
 ```
 
 ---
@@ -309,7 +328,7 @@ interface SmartInspectorOptions {
 Скопируйте файл `tests/inspect.spec.ts` в свой проект, укажите URL и запустите:
 
 ```typescript
-// inspect.spec.ts — меняйте только эти две переменные:
+// inspect.spec.ts — меняйте только эти переменные:
 
 const TARGET_URL = 'https://your-project.com/page-to-inspect';
 
@@ -318,6 +337,9 @@ const LOCATOR_ATTRIBUTES = [
   'data-cy',     // если используете Cypress-атрибуты
   'data-qa',
 ];
+
+// activationKey не нужен — определится автоматически
+// macOS → Ctrl+Click, Windows/Linux → Alt+Click
 ```
 
 ```bash
@@ -331,8 +353,6 @@ npx playwright test tests/inspect.spec.ts --headed
 ---
 
 ### Вариант 2 — запустить конкретный тест из вашего проекта
-
-Если хотите исследовать страницу в контексте уже существующего теста:
 
 ```bash
 # Один файл целиком
@@ -352,22 +372,6 @@ npx playwright test tests/checkout.spec.ts --headed --project=chromium
 
 ---
 
-### Настройка `tests/inspector.config.ts`
-
-```typescript
-export const INSPECTOR_CONFIG = {
-  targetUrl: 'https://your-project.com',
-  locatorAttributes: [
-    'data-testid',
-    'data-test-id',
-    'data-e2e',
-    'test-id',
-    // 'data-cy',
-    // 'data-qa',
-  ],
-};
-```
-
 ### Доступные скрипты
 
 ```bash
@@ -377,7 +381,6 @@ npm run test:manual:demo   # только Demo-тест (разведка эле
 ```
 
 ### Обновление библиотеки
-
 
 ```bash
 npm install --save-dev github:Evgeniy955/catch_locator#master
@@ -396,6 +399,9 @@ npm install --save-dev github:Evgeniy955/catch_locator#master
 │  │  page fixture (wrapper)                         │    │
 │  │                                                 │    │
 │  │  setup:  addInitScript(config)                  │    │
+│  │            └─ locatorAttributes                 │    │
+│  │            └─ activationKey (auto: darwin→ctrl, │    │
+│  │                              other →alt)        │    │
 │  │          exposeFunction('onLocatorGenerated')   │    │
 │  │          addInitScript(inspectorScript)         │    │
 │  │                                                 │    │
@@ -410,19 +416,22 @@ npm install --save-dev github:Evgeniy955/catch_locator#master
 ┌────────────────────▼────────────────────────────────────┐
 │                   Browser (Vanilla JS IIFE)              │
 │                                                         │
+│  window.__smartInspectorConfig                          │
+│    └─ locatorAttributes, activationKey                  │
+│                                                         │
 │  document.addEventListener('click', handler, capture)   │
 │                                                         │
-│  Alt+Click → composedPath()[0]  ← Shadow DOM support   │
-│           → P1: getByTestId / id                        │
-│           → P2: getByRole                               │
-│           → P3: getByLabel/Placeholder/Text             │
-│           → P4: locator([name=])                        │
-│           → P5: locator(tag.semantic-class)             │
-│           → buildCss()  ← без позиционных путей         │
-│           → buildXPath() ← якорь: attr/id/placeholder   │
-│           → window.onLocatorGenerated(payload)          │
-│           → navigator.clipboard.writeText(pw)           │
-│           → element.style.outline (подсветка 1.5s)      │
+│  {Key}+Click → composedPath()[0] ← Shadow DOM support  │
+│             → P1: getByTestId / id                      │
+│             → P2: getByRole                             │
+│             → P3: getByLabel/Placeholder/Text           │
+│             → P4: locator([name=])                      │
+│             → P5: locator(tag.semantic-class)           │
+│             → buildCss()  ← без позиционных путей       │
+│             → buildXPath() ← якорь: attr/id/placeholder │
+│             → window.onLocatorGenerated(payload)        │
+│             → navigator.clipboard.writeText(pw)         │
+│             → element.style.outline (подсветка 1.5s)    │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -436,6 +445,7 @@ npm install --save-dev github:Evgeniy955/catch_locator#master
 | `composedPath()[0]` | Единственный надёжный способ получить элемент внутри Shadow DOM |
 | `page.evaluate()` | DOM-запросы точнее regex по HTML-строке |
 | `{ option: true }` | Флаг Playwright, позволяет переопределять через `test.use()` |
+| `process.platform` | Авто-определение клавиши: `darwin` → `ctrl`, остальные → `alt` |
 
 ---
 
@@ -449,7 +459,6 @@ src/
 
 tests/
 ├── inspect.spec.ts         — ⭐ мини-тест для быстрого поиска локаторов (менять только URL)
-├── inspector.config.ts     — настройка URL и локаторов для ручного тестирования
 └── manual-inspector.spec.ts — полный тест с разведкой интерактивных элементов
 
 dist/                       — скомпилированный JS + .d.ts (коммитится в Git)

@@ -119,15 +119,25 @@ export const test = base.extend<SmartInspectorFixtures>({
     if (smartInspector.enabled) {
       const locatorAttributes = smartInspector.locatorAttributes ?? DEFAULT_LOCATOR_ATTRS;
 
+      // Авто-определение клавиши-модификатора по платформе:
+      //   macOS (darwin) → 'ctrl'  (Alt/Option перехватывается системой на Mac)
+      //   Windows/Linux  → 'alt'
+      // Явно заданный activationKey всегда имеет приоритет.
+      const activationKey: string =
+        smartInspector.activationKey ??
+        (process.platform === 'darwin' ? 'ctrl' : 'alt');
+
       // Инъекция 1: передаём конфиг в браузер ДО загрузки inspector-скрипта.
       // Скрипт читает window.__smartInspectorConfig при инициализации.
       await page.addInitScript(
-        `window.__smartInspectorConfig = ${JSON.stringify({ locatorAttributes })};`
+        `window.__smartInspectorConfig = ${JSON.stringify({ locatorAttributes, activationKey })};`
       );
 
       // Инъекция 2: exposeFunction — мост Browser → Node.js.
       // Когда браузер вызывает window.onLocatorGenerated(payload),
       // Playwright перенаправляет вызов в эту Node.js-функцию.
+      // activationKey замыкается из внешнего scope — используется в подсказке.
+      const keyLabel = activationKey.charAt(0).toUpperCase() + activationKey.slice(1);
       await page.exposeFunction('onLocatorGenerated', (payload: LocatorPayload) => {
         console.log('\n' + '═'.repeat(62));
         console.log(`[Inspector] 📍 Element: <${payload.tagName}>  Strategy: ${payload.strategy}`);
@@ -141,6 +151,7 @@ export const test = base.extend<SmartInspectorFixtures>({
         }
         console.log('─'.repeat(62));
         console.log(`  📋 Copied   : ${payload.playwrightLocator}`);
+        console.log(`  💡 Tip      : ${keyLabel}+Click to inspect next element`);
         console.log('═'.repeat(62) + '\n');
       });
 

@@ -4,7 +4,7 @@
  */
 export interface SmartInspectorOptions {
   /**
-   * Включает/выключает браузерный инспектор (Alt+Click) и механизм Self-Healing.
+   * Включает/выключает браузерный инспектор и механизм Self-Healing.
    * По умолчанию: true
    */
   enabled: boolean;
@@ -14,6 +14,19 @@ export interface SmartInspectorOptions {
    * По умолчанию: ["data-testid", "data-test-id", "data-e2e", "test-id"]
    */
   locatorAttributes?: string[];
+  /**
+   * Клавиша-модификатор для активации инспектора (кликнуть с зажатой клавишей).
+   *
+   * Рекомендации по платформам:
+   *   - Windows / Linux : 'alt'  (Alt+Click)
+   *   - macOS           : 'ctrl' (Ctrl+Click) — Alt/Option на Mac перехватывается системой
+   *
+   * Если не задано — определяется автоматически:
+   *   macOS → 'ctrl', остальные → 'alt'
+   *
+   * Допустимые значения: 'alt' | 'ctrl' | 'shift' | 'meta'
+   */
+  activationKey?: 'alt' | 'ctrl' | 'shift' | 'meta';
 }
 
 /**

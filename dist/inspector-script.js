@@ -411,10 +411,30 @@ exports.inspectorScript = `
     return segments.length > 0 ? '//' + segments.join('/') : '';
   }
 
-  // ─── Главный обработчик Alt+Click ────────────────────────────────────────────
+  // ─── Главный обработчик клика с модификатором ────────────────────────────────
+  //
+  // Клавиша активации читается из CFG.activationKey (передаётся через __smartInspectorConfig).
+  // Дефолт по платформе задаётся на Node-стороне (index.ts):
+  //   macOS  → 'ctrl'  (Alt/Option перехватывается системой)
+  //   другие → 'alt'
 
-  function handleAltClick(event) {
-    if (!event.altKey) return;
+  var KEY = (CFG.activationKey || 'alt').toLowerCase();
+
+  // Карта: ключ конфига → флаг MouseEvent
+  var KEY_FLAGS = {
+    alt:   function(e) { return e.altKey; },
+    ctrl:  function(e) { return e.ctrlKey; },
+    shift: function(e) { return e.shiftKey; },
+    meta:  function(e) { return e.metaKey; }
+  };
+
+  function isActivationKeyPressed(event) {
+    var check = KEY_FLAGS[KEY] || KEY_FLAGS['alt'];
+    return check(event);
+  }
+
+  function handleInspectorClick(event) {
+    if (!isActivationKeyPressed(event)) return;
     event.preventDefault();
     event.stopPropagation();
 
@@ -456,7 +476,10 @@ exports.inspectorScript = `
     }
   }
 
-  document.addEventListener('click', handleAltClick, true);
-  console.log('[SmartInspector] ✅ Activated. Alt+Click any element to inspect locators.');
+  document.addEventListener('click', handleInspectorClick, true);
+
+  // Выводим актуальную клавишу в лог браузера
+  var keyDisplay = KEY.charAt(0).toUpperCase() + KEY.slice(1);
+  console.log('[SmartInspector] ✅ Activated. ' + keyDisplay + '+Click any element to inspect locators.');
 })();
 `;
