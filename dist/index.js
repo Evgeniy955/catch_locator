@@ -129,27 +129,30 @@ exports.test = test_1.test.extend({
     page: async ({ page, smartInspector }, use, testInfo) => {
         if (smartInspector.enabled) {
             const locatorAttributes = smartInspector.locatorAttributes ?? DEFAULT_LOCATOR_ATTRS;
+            const context = page.context();
             // Авто-определение клавиши-модификатора по платформе:
             //   macOS (darwin) → 'meta'  (⌘ Cmd; Ctrl открывает контекстное меню на Mac)
             //   Windows/Linux  → 'alt'
             // Явно заданный activationKey всегда имеет приоритет.
             const activationKey = smartInspector.activationKey ??
                 (process.platform === 'darwin' ? 'meta' : 'alt');
-            // Инъекция 1: передаём конфиг в браузер ДО загрузки inspector-скрипта.
-            // Скрипт читает window.__smartInspectorConfig при инициализации.
-            await page.addInitScript(`window.__smartInspectorConfig = ${JSON.stringify({ locatorAttributes, activationKey })};`);
-            // Инъекция 2: exposeFunction — мост Browser → Node.js.
-            // Когда браузер вызывает window.onLocatorGenerated(payload),
-            // Playwright перенаправляет вызов в эту Node.js-функцию.
-            // activationKey замыкается из внешнего scope — используется в подсказке.
             const keyLabel = activationKey.charAt(0).toUpperCase() + activationKey.slice(1);
-            await page.exposeFunction('onLocatorGenerated', (payload) => {
-                const dedupeKey = `${payload.playwrightLocator}|${payload.indexBasedLocator}|${payload.cssSelector}|${payload.xpath}`;
+            const configScript = `window.__smartInspectorConfig = ${JSON.stringify({ locatorAttributes, activationKey })};`;
+            // Инжектируем конфиг/инспектор на весь context: текущая вкладка + все новые popups/tabs.
+            await context.addInitScript(configScript);
+            await context.addInitScript(inspector_script_1.inspectorScript);
+            let lastSeenUrl = null;
+            // Единый мост Browser → Node.js для всех страниц context.
+            await context.exposeFunction('onLocatorGenerated', (payload) => {
+                const dedupeKey = `${payload.pageUrl}|${payload.playwrightLocator}|${payload.indexBasedLocator}|${payload.cssSelector}|${payload.xpath}`;
                 if (!shouldPrintLocatorEvent(dedupeKey))
                     return;
+                const urlChanged = !!lastSeenUrl && lastSeenUrl !== payload.pageUrl;
+                lastSeenUrl = payload.pageUrl;
                 console.log('\n' + '═'.repeat(62));
                 console.log(`[Inspector] 📍 Element: <${payload.tagName}>  Strategy: ${payload.strategy}`);
                 console.log('─'.repeat(62));
+                console.log(`  URL         : ${payload.pageUrl}${urlChanged ? '  (changed)' : ''}`);
                 console.log(`  Playwright  : ${payload.playwrightLocator}`);
                 console.log(`  By index    : ${payload.indexBasedLocator}`);
                 console.log(`  CSS         : ${payload.cssSelector}`);
@@ -164,8 +167,6 @@ exports.test = test_1.test.extend({
                 console.log(`  💡 Tip      : ${keyLabel}+Click to inspect next element`);
                 console.log('═'.repeat(62) + '\n');
             });
-            // Инъекция 3: сам inspector-скрипт (переинжектируется при каждой навигации).
-            await page.addInitScript(inspector_script_1.inspectorScript);
         }
         await use(page);
         // ── Self-Healing: после завершения теста ─────────────────────────────────

@@ -573,6 +573,7 @@ exports.inspectorScript = `
     var payload = {
       playwrightLocator: pw,
       indexBasedLocator: indexBased,
+      pageUrl: window.location.href,
       cssSelector: css,
       xpath: xpath,
       strategy: strat,
