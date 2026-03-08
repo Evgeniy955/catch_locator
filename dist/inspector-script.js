@@ -26,6 +26,15 @@ exports.inspectorScript = `
 (function () {
   'use strict';
 
+  // Запускаемся только в top-фрейме.
+  // addInitScript выполняется для каждого фрейма страницы (включая iframes),
+  // что приводит к двойному вызову onLocatorGenerated.
+  if (window !== window.top) return;
+
+  // Защита от двойной регистрации при повторном вызове addInitScript (например, после навигации).
+  if (window.__smartInspectorActive) return;
+  window.__smartInspectorActive = true;
+
   var CFG   = window.__smartInspectorConfig || {};
   var ATTRS = CFG.locatorAttributes || ['data-testid', 'data-test-id', 'data-e2e', 'test-id'];
 
@@ -415,7 +424,7 @@ exports.inspectorScript = `
   //
   // Клавиша активации читается из CFG.activationKey (передаётся через __smartInspectorConfig).
   // Дефолт по платформе задаётся на Node-стороне (index.ts):
-  //   macOS  → 'ctrl'  (Alt/Option перехватывается системой)
+  //   macOS  → 'meta'  (⌘ Cmd; Ctrl открывает контекстное меню)
   //   другие → 'alt'
 
   var KEY = (CFG.activationKey || 'alt').toLowerCase();
@@ -433,10 +442,20 @@ exports.inspectorScript = `
     return check(event);
   }
 
+  var _handling = false;
+  var _lastPayloadKey = '';
+  var _lastPayloadTs = 0;
+  var PAYLOAD_DEDUPE_WINDOW_MS = 1500;
+
   function handleInspectorClick(event) {
     if (!isActivationKeyPressed(event)) return;
+    if (_handling) return;
+    _handling = true;
+    setTimeout(function () { _handling = false; }, 250);
+
     event.preventDefault();
     event.stopPropagation();
+    event.stopImmediatePropagation();
 
     // Shadow DOM: composedPath()[0] даёт реальный целевой элемент
     var path = event.composedPath();
@@ -466,6 +485,15 @@ exports.inspectorScript = `
       tagName: target.tagName.toLowerCase()
     };
 
+    // Browser-side dedupe to avoid double callback from synthetic/duplicated events.
+    var payloadKey = payload.playwrightLocator + '|' + payload.cssSelector + '|' + payload.xpath;
+    var now = Date.now();
+    if (payloadKey === _lastPayloadKey && (now - _lastPayloadTs) < PAYLOAD_DEDUPE_WINDOW_MS) {
+      return;
+    }
+    _lastPayloadKey = payloadKey;
+    _lastPayloadTs = now;
+
     if (typeof window.onLocatorGenerated === 'function') {
       window.onLocatorGenerated(payload);
     }
@@ -476,7 +504,8 @@ exports.inspectorScript = `
     }
   }
 
-  document.addEventListener('click', handleInspectorClick, true);
+  // pointerdown is more stable than click for modified-click inspector mode.
+  document.addEventListener('pointerdown', handleInspectorClick, true);
 
   // Выводим актуальную клавишу в лог браузера
   var keyDisplay = KEY.charAt(0).toUpperCase() + KEY.slice(1);

@@ -28,7 +28,7 @@
 | ⚡ **Zero config** | Работает из коробки — просто замените импорт `test` |
 | 🔧 **Управляемый** | Отключается per-test через `test.use({ smartInspector: { enabled: false } })` |
 | 🏷 **Кастомные атрибуты** | Настройте свои `data-*` атрибуты (`data-cy`, `data-qa`, `data-e2e`) — они будут проверяться первыми |
-| 🖥 **Кросс-платформенный** | `Alt+Click` на Windows/Linux, `Ctrl+Click` на macOS — определяется автоматически |
+| 🖥 **Кросс-платформенный** | `Alt+Click` на Windows/Linux, `Cmd+Click` на macOS — определяется автоматически |
 
 ---
 
@@ -117,14 +117,14 @@ npx playwright test tests/my-test.spec.ts --headed --grep "название те
 | Платформа | Клавиша | Причина |
 |---|---|---|
 | **Windows / Linux** | `Alt+Click` | Стандартная работа |
-| **macOS** | `Ctrl+Click` | `Alt/Option` перехватывается системой браузера на Mac |
+| **macOS** | `Cmd+Click` | На Mac `Ctrl+Click` часто открывает контекстное меню |
 
 Клавиша определяется **автоматически** по `process.platform`. Можно переопределить явно через `activationKey` (см. [Конфигурация](#конфигурация)).
 
 ### Как использовать
 
 1. Запустите тест в **headed-режиме**: `npx playwright test --headed`
-2. В браузере зажмите нужную клавишу (`Alt` или `Ctrl`) и кликните на элемент
+2. В браузере зажмите нужную клавишу (`Alt` или `Cmd`) и кликните на элемент
 3. Элемент подсветится красной рамкой на 1.5 секунды
 4. В терминале появятся все варианты локаторов
 5. Playwright-локатор **автоматически скопируется** в буфер обмена
@@ -143,6 +143,23 @@ npx playwright test tests/my-test.spec.ts --headed --grep "название те
   💡 Tip      : Alt+Click to inspect next element
 ══════════════════════════════════════════════════════════════
 ```
+
+### Если вывод дублируется
+
+Если блоки `[Inspector]` печатаются по 2 раза, обычно проблема в запуске теста из IDE (двойной процесс/раннер), а не в генерации локаторов.
+
+```bash
+npm run inspect -- --list
+npm run inspect -- --project=chromium-manual --workers=1 --retries=0 --repeat-each=1
+```
+
+Проверьте, что:
+
+- используется один run config (или запуск через `npm run inspect`)
+- в IDE не включены несколько `project`
+- тест не запускается с повторениями
+
+В библиотеке уже есть dedupe-защита на двух уровнях: Browser-side (`PAYLOAD_DEDUPE_WINDOW_MS` в `src/inspector-script.ts`) и Node-side (`shouldPrintLocatorEvent()` в `src/index.ts`).
 
 ### Приоритеты генерации локаторов
 
@@ -236,7 +253,7 @@ interface SmartInspectorOptions {
    * Клавиша-модификатор для активации инспектора.
    *
    * Если не задана — определяется автоматически:
-   *   macOS  → 'ctrl'  (Ctrl+Click)
+   *   macOS  → 'meta'  (Cmd+Click)
    *   другие → 'alt'   (Alt+Click)
    *
    * Переопределить явно:
@@ -265,11 +282,11 @@ export default defineConfig({
 ### Явно указать клавишу (переопределение)
 
 ```typescript
-// Принудительно Ctrl+Click на любой платформе
+// Принудительно Cmd+Click на любой платформе
 test.use({
   smartInspector: {
     enabled: true,
-    activationKey: 'ctrl',
+    activationKey: 'meta',
   },
 });
 ```
@@ -315,7 +332,7 @@ import { expect } from 'playwright-smart-inspector';
 test('пример', async ({ page, smartInspector }) => {
   console.log(smartInspector.enabled);           // true
   console.log(smartInspector.locatorAttributes); // ['data-testid', ...]
-  console.log(smartInspector.activationKey);     // 'alt' | 'ctrl' | undefined
+  console.log(smartInspector.activationKey);     // 'alt' | 'ctrl' | 'shift' | 'meta' | undefined
 });
 ```
 
@@ -339,7 +356,7 @@ const LOCATOR_ATTRIBUTES = [
 ];
 
 // activationKey не нужен — определится автоматически
-// macOS → Ctrl+Click, Windows/Linux → Alt+Click
+// macOS → Cmd+Click, Windows/Linux → Alt+Click
 ```
 
 ```bash
@@ -400,7 +417,7 @@ npm install --save-dev github:Evgeniy955/catch_locator#master
 │  │                                                 │    │
 │  │  setup:  addInitScript(config)                  │    │
 │  │            └─ locatorAttributes                 │    │
-│  │            └─ activationKey (auto: darwin→ctrl, │    │
+│  │            └─ activationKey (auto: darwin→meta, │    │
 │  │                              other →alt)        │    │
 │  │          exposeFunction('onLocatorGenerated')   │    │
 │  │          addInitScript(inspectorScript)         │    │
@@ -419,7 +436,7 @@ npm install --save-dev github:Evgeniy955/catch_locator#master
 │  window.__smartInspectorConfig                          │
 │    └─ locatorAttributes, activationKey                  │
 │                                                         │
-│  document.addEventListener('click', handler, capture)   │
+│  document.addEventListener('pointerdown', handler, capture) │
 │                                                         │
 │  {Key}+Click → composedPath()[0] ← Shadow DOM support  │
 │             → P1: getByTestId / id                      │
@@ -445,7 +462,7 @@ npm install --save-dev github:Evgeniy955/catch_locator#master
 | `composedPath()[0]` | Единственный надёжный способ получить элемент внутри Shadow DOM |
 | `page.evaluate()` | DOM-запросы точнее regex по HTML-строке |
 | `{ option: true }` | Флаг Playwright, позволяет переопределять через `test.use()` |
-| `process.platform` | Авто-определение клавиши: `darwin` → `ctrl`, остальные → `alt` |
+| `process.platform` | Авто-определение клавиши: `darwin` → `meta`, остальные → `alt` |
 
 ---
 

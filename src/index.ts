@@ -22,6 +22,28 @@ import type { SmartInspectorFixtures, LocatorPayload, LocatorCandidate, HealingR
 // Дефолтные атрибуты P1 — используются если locatorAttributes не задан в опциях
 const DEFAULT_LOCATOR_ATTRS = ['data-testid', 'data-test-id', 'data-e2e', 'test-id'];
 
+// Shared dedupe guard across all fixture/callback instances.
+const LOCATOR_DEDUPE_WINDOW_MS = 1500;
+const recentLocatorEvents = new Map<string, number>();
+
+function shouldPrintLocatorEvent(key: string): boolean {
+  const now = Date.now();
+  const prev = recentLocatorEvents.get(key);
+
+  if (typeof prev === 'number' && now - prev < LOCATOR_DEDUPE_WINDOW_MS) {
+    return false;
+  }
+
+  recentLocatorEvents.set(key, now);
+
+  // Periodic cleanup to keep memory bounded during long manual sessions.
+  for (const [k, ts] of recentLocatorEvents) {
+    if (now - ts >= LOCATOR_DEDUPE_WINDOW_MS * 5) recentLocatorEvents.delete(k);
+  }
+
+  return true;
+}
+
 // ─── Вспомогательные функции Node-side ──────────────────────────────────────
 
 function extractFailedSelector(errorMessage: string): string | null {
@@ -138,7 +160,11 @@ export const test = base.extend<SmartInspectorFixtures>({
       // Playwright перенаправляет вызов в эту Node.js-функцию.
       // activationKey замыкается из внешнего scope — используется в подсказке.
       const keyLabel = activationKey.charAt(0).toUpperCase() + activationKey.slice(1);
+
       await page.exposeFunction('onLocatorGenerated', (payload: LocatorPayload) => {
+        const dedupeKey = `${payload.playwrightLocator}|${payload.cssSelector}|${payload.xpath}`;
+        if (!shouldPrintLocatorEvent(dedupeKey)) return;
+
         console.log('\n' + '═'.repeat(62));
         console.log(`[Inspector] 📍 Element: <${payload.tagName}>  Strategy: ${payload.strategy}`);
         console.log('─'.repeat(62));

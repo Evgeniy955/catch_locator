@@ -20,6 +20,23 @@ const test_1 = require("@playwright/test");
 const inspector_script_1 = require("./inspector-script");
 // Дефолтные атрибуты P1 — используются если locatorAttributes не задан в опциях
 const DEFAULT_LOCATOR_ATTRS = ['data-testid', 'data-test-id', 'data-e2e', 'test-id'];
+// Shared dedupe guard across all fixture/callback instances.
+const LOCATOR_DEDUPE_WINDOW_MS = 1500;
+const recentLocatorEvents = new Map();
+function shouldPrintLocatorEvent(key) {
+    const now = Date.now();
+    const prev = recentLocatorEvents.get(key);
+    if (typeof prev === 'number' && now - prev < LOCATOR_DEDUPE_WINDOW_MS) {
+        return false;
+    }
+    recentLocatorEvents.set(key, now);
+    // Periodic cleanup to keep memory bounded during long manual sessions.
+    for (const [k, ts] of recentLocatorEvents) {
+        if (now - ts >= LOCATOR_DEDUPE_WINDOW_MS * 5)
+            recentLocatorEvents.delete(k);
+    }
+    return true;
+}
 // ─── Вспомогательные функции Node-side ──────────────────────────────────────
 function extractFailedSelector(errorMessage) {
     const match = (/'([^']+)'/).exec(errorMessage);
@@ -113,11 +130,11 @@ exports.test = test_1.test.extend({
         if (smartInspector.enabled) {
             const locatorAttributes = smartInspector.locatorAttributes ?? DEFAULT_LOCATOR_ATTRS;
             // Авто-определение клавиши-модификатора по платформе:
-            //   macOS (darwin) → 'ctrl'  (Alt/Option перехватывается системой на Mac)
+            //   macOS (darwin) → 'meta'  (⌘ Cmd; Ctrl открывает контекстное меню на Mac)
             //   Windows/Linux  → 'alt'
             // Явно заданный activationKey всегда имеет приоритет.
             const activationKey = smartInspector.activationKey ??
-                (process.platform === 'darwin' ? 'ctrl' : 'alt');
+                (process.platform === 'darwin' ? 'meta' : 'alt');
             // Инъекция 1: передаём конфиг в браузер ДО загрузки inspector-скрипта.
             // Скрипт читает window.__smartInspectorConfig при инициализации.
             await page.addInitScript(`window.__smartInspectorConfig = ${JSON.stringify({ locatorAttributes, activationKey })};`);
@@ -127,6 +144,9 @@ exports.test = test_1.test.extend({
             // activationKey замыкается из внешнего scope — используется в подсказке.
             const keyLabel = activationKey.charAt(0).toUpperCase() + activationKey.slice(1);
             await page.exposeFunction('onLocatorGenerated', (payload) => {
+                const dedupeKey = `${payload.playwrightLocator}|${payload.cssSelector}|${payload.xpath}`;
+                if (!shouldPrintLocatorEvent(dedupeKey))
+                    return;
                 console.log('\n' + '═'.repeat(62));
                 console.log(`[Inspector] 📍 Element: <${payload.tagName}>  Strategy: ${payload.strategy}`);
                 console.log('─'.repeat(62));

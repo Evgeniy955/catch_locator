@@ -7,7 +7,7 @@
 | Платформа | Клавиша | Примечание |
 |---|---|---|
 | **Windows / Linux** | `Alt+Click` | Стандартная работа |
-| **macOS** | `Ctrl+Click` | `Alt/Option` перехватывается системой браузера на Mac |
+| **macOS** | `Cmd+Click` | На Mac `Ctrl+Click` обычно открывает контекстное меню |
 
 Клавиша определяется **автоматически** — ничего настраивать не нужно.  
 Для ручного переопределения используйте `activationKey` в опциях (см. ниже).
@@ -36,7 +36,7 @@ const LOCATOR_ATTRIBUTES = [
 ];
 
 // activationKey не нужен — определится автоматически:
-//   macOS        → Ctrl+Click
+//   macOS        → Cmd+Click
 //   Windows/Linux → Alt+Click
 ```
 
@@ -49,7 +49,7 @@ npm run inspect
 ### 3. Используйте инспектор в браузере
 
 - **Windows/Linux:** зажмите **`Alt`** и кликните на любой элемент
-- **macOS:** зажмите **`Ctrl`** и кликните на любой элемент
+- **macOS:** зажмите **`Cmd`** и кликните на любой элемент
 - Элемент подсветится красной рамкой
 - В терминале появятся локаторы:
 
@@ -62,7 +62,7 @@ npm run inspect
   XPath       : //button[normalize-space()="Генерировать"]
 ──────────────────────────────────────────────────────────────
   📋 Copied   : page.getByRole("button", { name: "Генерировать" })
-  💡 Tip      : Alt+Click to inspect next element
+  💡 Tip      : Meta+Click to inspect next element
 ══════════════════════════════════════════════════════════════
 ```
 
@@ -133,11 +133,11 @@ test.use({
     enabled: true,
     locatorAttributes: LOCATOR_ATTRIBUTES,
     // activationKey не указан → определится автоматически:
-    //   macOS         → 'ctrl'  (Ctrl+Click)
+    //   macOS         → 'meta'  (Cmd+Click)
     //   Windows/Linux → 'alt'   (Alt+Click)
     //
     // Переопределить явно (если нужно):
-    // activationKey: 'ctrl',
+    // activationKey: 'meta',
   },
 });
 
@@ -167,3 +167,21 @@ npx playwright test tests/inspect.spec.ts --headed
 | **P5** | `locator(tag.class)` | `page.locator("button.submit-btn")` |
 
 > Подробнее — см. [README.md](./README.md)
+
+## Если вывод дублируется
+
+Если `[Inspector]` блоки появляются по 2 раза, обычно проблема в запуске теста из IDE (дублируется процесс/раннер), а не в генерации локатора.
+
+Проверьте запуск:
+
+```bash
+npm run inspect -- --list
+npm run inspect -- --project=chromium-manual --workers=1 --retries=0 --repeat-each=1
+```
+
+Что важно:
+
+- запускайте через npm-скрипт `inspect` (или один Playwright run config)
+- убедитесь, что не включены несколько `project` в раннере IDE
+- в библиотеке уже есть защита от дублей на Browser-side и Node-side
+
