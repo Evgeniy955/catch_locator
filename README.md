@@ -23,8 +23,10 @@
 | Компонент | Описание |
 |---|---|
 | 🔍 **Interactive Inspector** | Зажмите модификатор и кликните на элемент — библиотека сгенерирует Playwright-локатор, CSS и XPath, скопирует лучший вариант в буфер обмена |
+| 🔢 **Index-based locator** | Дополнительно генерируется `page.locator(...).nth(index)` без привязки к тексту, чтобы отдельно проверять текст в тесте |
 | 🛠 **Self-Healing** | При падении теста анализирует DOM и предлагает до 3 альтернативных локаторов с оценкой релевантности |
 | 🌑 **Shadow DOM** | Корректно определяет элементы внутри Shadow DOM через `composedPath()` |
+| 🪟 **Multi-tab aware** | Инспектор работает в текущей вкладке и во всех новых popups/tabs внутри одного browser context |
 | ⚡ **Zero config** | Работает из коробки — просто замените импорт `test` |
 | 🔧 **Управляемый** | Отключается per-test через `test.use({ smartInspector: { enabled: false } })` |
 | 🏷 **Кастомные атрибуты** | Настройте свои `data-*` атрибуты (`data-cy`, `data-qa`, `data-e2e`) — они будут проверяться первыми |
@@ -135,18 +137,20 @@ npx playwright test tests/my-test.spec.ts --headed --grep "название те
 ══════════════════════════════════════════════════════════════
 [Inspector] 📍 Element: <textarea>  Strategy: placeholder
 ──────────────────────────────────────────────────────────────
+  URL         : https://demoqa.com/text-box
   Playwright  : page.getByPlaceholder("Введите ваш текст здесь...")
+  By index    : page.locator("form textarea").nth(0)
   CSS         : textarea[placeholder="Введите ваш текст здесь..."]
   XPath       : //textarea[@placeholder="Введите ваш текст здесь..."]
 ──────────────────────────────────────────────────────────────
   📋 Copied   : page.getByPlaceholder("Введите ваш текст здесь...")
-  💡 Tip      : Alt+Click to inspect next element
+  💡 Tip      : Cmd+Click to inspect next element
 ══════════════════════════════════════════════════════════════
 ```
 
 ### Если вывод дублируется
 
-Если блоки `[Inspector]` печатаются по 2 раза, обычно проблема в запуске теста из IDE (двойной процесс/раннер), а не в генерации локаторов.
+Если блоки `[Inspector]` печатаются по 2 раза, обычно проблема в запуске теста (два процесса/проекта/retry/repeat), а не в генерации локаторов.
 
 ```bash
 npm run inspect -- --list
@@ -157,9 +161,9 @@ npm run inspect -- --project=chromium-manual --workers=1 --retries=0 --repeat-ea
 
 - используется один run config (или запуск через `npm run inspect`)
 - в IDE не включены несколько `project`
-- тест не запускается с повторениями
+- тест не запускается с `--repeat-each`, `--retries` и параллельными дублями запуска
 
-В библиотеке уже есть dedupe-защита на двух уровнях: Browser-side (`PAYLOAD_DEDUPE_WINDOW_MS` в `src/inspector-script.ts`) и Node-side (`shouldPrintLocatorEvent()` в `src/index.ts`).
+В библиотеке есть dedupe-защита на двух уровнях: Browser-side (`PAYLOAD_DEDUPE_WINDOW_MS` в `src/inspector-script.ts`) и Node-side (`shouldPrintLocatorEvent()` в `src/index.ts`).
 
 ### Приоритеты генерации локаторов
 
@@ -172,6 +176,9 @@ npm run inspect -- --project=chromium-manual --workers=1 --retries=0 --repeat-ea
 | **P3** | `getByLabel()` / `getByPlaceholder()` / `getByAltText()` / `getByTitle()` / `getByText()` | `page.getByPlaceholder("Email")` |
 | **P4** | `locator([name=])` | `page.locator("[name=\"email\"]")` |
 | **P5** | `locator(tag.semantic-class)` | `page.locator("button.submit-btn")` |
+
+Дополнительно всегда выводится `By index`: `page.locator("...").nth(index)`.
+Он не использует `hasText`/`filter({ hasText })`, чтобы текст можно было проверять отдельно в тесте.
 
 #### CSS-селектор
 
@@ -411,16 +418,16 @@ npm install --save-dev github:Evgeniy955/catch_locator#master
 ┌─────────────────────────────────────────────────────────┐
 │                    Node.js (Playwright)                  │
 │                                                         │
-│  test.extend<SmartInspectorFixtures>()                  │
+│  test.extend<SmartInspectorFixtures>()                  │    │
 │  ┌─────────────────────────────────────────────────┐    │
 │  │  page fixture (wrapper)                         │    │
 │  │                                                 │    │
-│  │  setup:  addInitScript(config)                  │    │
+│  │  setup:  context.addInitScript(config)          │    │
 │  │            └─ locatorAttributes                 │    │
 │  │            └─ activationKey (auto: darwin→meta, │    │
 │  │                              other →alt)        │    │
-│  │          exposeFunction('onLocatorGenerated')   │    │
-│  │          addInitScript(inspectorScript)         │    │
+│  │          context.addInitScript(inspectorScript) │    │
+│  │          context.exposeFunction('onLocatorGenerated')│
 │  │                                                 │    │
 │  │  teardown: Self-Healing (если failed/timedOut)  │    │
 │  │    └─ extractFailedSelector(error.message)      │    │
@@ -428,8 +435,7 @@ npm install --save-dev github:Evgeniy955/catch_locator#master
 │  │    └─ printHealingReport(top-3 by score)        │    │
 │  └─────────────────────────────────────────────────┘    │
 └────────────────────┬────────────────────────────────────┘
-                     │ exposeFunction bridge
-                     │ (window.onLocatorGenerated)
+                     │ единый bridge для всех страниц context
 ┌────────────────────▼────────────────────────────────────┐
 │                   Browser (Vanilla JS IIFE)              │
 │                                                         │
@@ -444,9 +450,10 @@ npm install --save-dev github:Evgeniy955/catch_locator#master
 │             → P3: getByLabel/Placeholder/Text           │
 │             → P4: locator([name=])                      │
 │             → P5: locator(tag.semantic-class)           │
+│             → By index: locator(...).nth(index)         │
 │             → buildCss()  ← без позиционных путей       │
 │             → buildXPath() ← якорь: attr/id/placeholder │
-│             → window.onLocatorGenerated(payload)        │
+│             → window.onLocatorGenerated(payload+url)    │
 │             → navigator.clipboard.writeText(pw)         │
 │             → element.style.outline (подсветка 1.5s)    │
 └─────────────────────────────────────────────────────────┘
@@ -457,46 +464,12 @@ npm install --save-dev github:Evgeniy955/catch_locator#master
 | Решение | Зачем |
 |---|---|
 | `test.extend<T>()` | Стандартный механизм Playwright Fixtures, без monkey-patching |
-| `page.exposeFunction()` | Безопасный мост Browser → Node.js |
-| `page.addInitScript()` | Переинжектируется автоматически при каждой навигации |
+| `context.exposeFunction()` | Единый мост Browser → Node.js для текущей и новых вкладок |
+| `context.addInitScript()` | Переинжектируется при навигациях и применяется к popups/tabs в этом context |
 | `composedPath()[0]` | Единственный надёжный способ получить элемент внутри Shadow DOM |
 | `page.evaluate()` | DOM-запросы точнее regex по HTML-строке |
 | `{ option: true }` | Флаг Playwright, позволяет переопределять через `test.use()` |
 | `process.platform` | Авто-определение клавиши: `darwin` → `meta`, остальные → `alt` |
+| Browser+Node dedupe | Убирает дубли логов из повторных событий и параллельных callback-инстансов |
 
 ---
-
-## Структура проекта
-
-```
-src/
-├── types.ts                — интерфейсы (SmartInspectorOptions, LocatorPayload, HealingReport)
-├── inspector-script.ts     — браузерный IIFE (Vanilla JS как TS-строка)
-└── index.ts                — главный модуль (test.extend, exposeFunction, Self-Healing)
-
-tests/
-├── inspect.spec.ts         — ⭐ мини-тест для быстрого поиска локаторов (менять только URL)
-└── manual-inspector.spec.ts — полный тест с разведкой интерактивных элементов
-
-dist/                       — скомпилированный JS + .d.ts (коммитится в Git)
-├── index.js / index.d.ts
-├── inspector-script.js / inspector-script.d.ts
-└── types.js / types.d.ts
-
-tsconfig.json               — конфиг для IDE (noEmit, покрывает src/ + tests/)
-tsconfig.build.json         — конфиг для сборки (только src/ → dist/)
-playwright.config.ts        — конфиг для ручного тестирования
-```
-
-### Сборка
-
-```bash
-npm run build   # tsc -p tsconfig.build.json → генерирует dist/
-```
-
----
-
-## Лицензия
-
-Private — только для внутреннего использования.
-

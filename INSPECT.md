@@ -16,8 +16,10 @@
 
 ## Быстрый старт — `inspect.spec.ts`
 
-Это мини-тест для поиска локаторов на любой странице.  
+Это мини-тест для поиска локаторов на любой странице.
 Запускается **отдельно** от ваших тестов — ничего не ломает.
+
+Инспектор работает не только в текущей вкладке: новые popups/tabs в этом же Playwright context тоже автоматически поддерживаются.
 
 ### 1. Настройте файл `tests/inspect.spec.ts`
 
@@ -51,23 +53,26 @@ npm run inspect
 - **Windows/Linux:** зажмите **`Alt`** и кликните на любой элемент
 - **macOS:** зажмите **`Cmd`** и кликните на любой элемент
 - Элемент подсветится красной рамкой
-- В терминале появятся локаторы:
+- В терминале появятся локаторы и URL текущей вкладки:
 
 ```
 ══════════════════════════════════════════════════════════════
 [Inspector] 📍 Element: <button>  Strategy: role
 ──────────────────────────────────────────────────────────────
-  Playwright  : page.getByRole("button", { name: "Генерировать" })
-  CSS         : button:has-text("Генерировать")
-  XPath       : //button[normalize-space()="Генерировать"]
+  URL         : https://demoqa.com/automation-practice-form
+  Playwright  : page.getByRole("button", { name: "Submit" })
+  By index    : page.locator("button").nth(0)
+  CSS         : button:has-text("Submit")
+  XPath       : //button[normalize-space()="Submit"]
 ──────────────────────────────────────────────────────────────
-  📋 Copied   : page.getByRole("button", { name: "Генерировать" })
-  💡 Tip      : Meta+Click to inspect next element
+  📋 Copied   : page.getByRole("button", { name: "Submit" })
+  💡 Tip      : Cmd+Click to inspect next element
 ══════════════════════════════════════════════════════════════
 ```
 
 - Playwright-локатор **автоматически скопируется** в буфер обмена
-- Вставьте его в тест: `Ctrl+V`
+- `By index` не использует `hasText`, поэтому текст удобно проверять отдельно в тесте
+- Вставьте локатор в тест: `Ctrl+V` / `Cmd+V`
 
 ### 4. Завершение
 
@@ -166,11 +171,14 @@ npx playwright test tests/inspect.spec.ts --headed
 | **P4** | `locator([name=])` | `page.locator("[name=\"email\"]")` |
 | **P5** | `locator(tag.class)` | `page.locator("button.submit-btn")` |
 
+Дополнительно всегда выводится `By index`: `page.locator("...").nth(index)`.
+Он нужен как текст-независимый локатор для проверок вида `await expect(locator).toHaveText(...)`.
+
 > Подробнее — см. [README.md](./README.md)
 
 ## Если вывод дублируется
 
-Если `[Inspector]` блоки появляются по 2 раза, обычно проблема в запуске теста из IDE (дублируется процесс/раннер), а не в генерации локатора.
+Если `[Inspector]` блоки появляются по 2 раза, обычно проблема в запуске теста (двойной run config, несколько `project`, retries/repeat), а не в генерации локатора.
 
 Проверьте запуск:
 
@@ -183,5 +191,5 @@ npm run inspect -- --project=chromium-manual --workers=1 --retries=0 --repeat-ea
 
 - запускайте через npm-скрипт `inspect` (или один Playwright run config)
 - убедитесь, что не включены несколько `project` в раннере IDE
-- в библиотеке уже есть защита от дублей на Browser-side и Node-side
-
+- не используйте одновременно `repeat-each`/`retries`, если отлаживаете инспектор
+- в библиотеке есть защита от дублей на Browser-side и Node-side

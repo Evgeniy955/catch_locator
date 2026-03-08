@@ -600,7 +600,10 @@ export const inspectorScript: string = `
   document.addEventListener('pointerdown', handleInspectorClick, true);
 
   // Выводим актуальную клавишу в лог браузера
-  var keyDisplay = KEY.charAt(0).toUpperCase() + KEY.slice(1);
+  var isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.platform || '');
+  var keyDisplay = (KEY === 'meta' && isMac)
+    ? 'Cmd'
+    : KEY.charAt(0).toUpperCase() + KEY.slice(1);
   console.log('[SmartInspector] ✅ Activated. ' + keyDisplay + '+Click any element to inspect locators.');
 })();
 `;
