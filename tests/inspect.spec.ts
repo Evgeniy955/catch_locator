@@ -38,11 +38,11 @@ const LOCATOR_ATTRIBUTES = [
 ];
 
 // Авто-определение клавиши активации по платформе:
-//   macOS  → Ctrl  (Alt/Option на Mac перехватывается системой браузера)
+//   macOS  → Meta / ⌘ Cmd  (Ctrl открывает контекстное меню, Alt/Option перехватывается системой)
 //   другие → Alt
 const IS_MAC = process.platform === 'darwin';
-const ACTIVATION_KEY = IS_MAC ? 'ctrl' : 'alt';
-const KEY_LABEL      = IS_MAC ? 'Ctrl' : 'Alt';
+const ACTIVATION_KEY = IS_MAC ? 'meta' : 'alt';
+const KEY_LABEL      = IS_MAC ? '⌘ Cmd' : 'Alt';
 
 // ─────────────────────────────────────────────────────────────────────────────
 

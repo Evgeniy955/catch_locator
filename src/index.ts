@@ -120,12 +120,12 @@ export const test = base.extend<SmartInspectorFixtures>({
       const locatorAttributes = smartInspector.locatorAttributes ?? DEFAULT_LOCATOR_ATTRS;
 
       // Авто-определение клавиши-модификатора по платформе:
-      //   macOS (darwin) → 'ctrl'  (Alt/Option перехватывается системой на Mac)
+      //   macOS (darwin) → 'meta'  (⌘ Cmd; Ctrl открывает контекстное меню на Mac)
       //   Windows/Linux  → 'alt'
       // Явно заданный activationKey всегда имеет приоритет.
       const activationKey: string =
         smartInspector.activationKey ??
-        (process.platform === 'darwin' ? 'ctrl' : 'alt');
+        (process.platform === 'darwin' ? 'meta' : 'alt');
 
       // Инъекция 1: передаём конфиг в браузер ДО загрузки inspector-скрипта.
       // Скрипт читает window.__smartInspectorConfig при инициализации.

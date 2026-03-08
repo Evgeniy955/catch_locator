@@ -412,7 +412,7 @@ export const inspectorScript: string = `
   //
   // Клавиша активации читается из CFG.activationKey (передаётся через __smartInspectorConfig).
   // Дефолт по платформе задаётся на Node-стороне (index.ts):
-  //   macOS  → 'ctrl'  (Alt/Option перехватывается системой)
+  //   macOS  → 'meta'  (⌘ Cmd; Ctrl открывает контекстное меню)
   //   другие → 'alt'
 
   var KEY = (CFG.activationKey || 'alt').toLowerCase();
