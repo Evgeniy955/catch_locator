@@ -25,7 +25,7 @@
 import { test, expect } from '../src';
 
 // ↓↓↓ УКАЖИТЕ URL СТРАНИЦЫ КОТОРУЮ ХОТИТЕ ИССЛЕДОВАТЬ ↓↓↓
-const TARGET_URL = 'https://www.onlytests.io/ru/tools/text-generator';
+const TARGET_URL = 'https://demoqa.com/automation-practice-form';
 
 // ↓↓↓ УКАЖИТЕ КАСТОМНЫЕ data-* АТРИБУТЫ ВАШЕГО ПРОЕКТА (Priority 1) ↓↓↓
 const LOCATOR_ATTRIBUTES = [
