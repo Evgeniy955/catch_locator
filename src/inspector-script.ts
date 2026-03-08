@@ -23,6 +23,15 @@ export const inspectorScript: string = `
 (function () {
   'use strict';
 
+  // Запускаемся только в top-фрейме.
+  // addInitScript выполняется для каждого фрейма страницы (включая iframes),
+  // что приводит к двойному вызову onLocatorGenerated.
+  if (window !== window.top) return;
+
+  // Защита от двойной регистрации при повторном вызове addInitScript (например, после навигации).
+  if (window.__smartInspectorActive) return;
+  window.__smartInspectorActive = true;
+
   var CFG   = window.__smartInspectorConfig || {};
   var ATTRS = CFG.locatorAttributes || ['data-testid', 'data-test-id', 'data-e2e', 'test-id'];
 
@@ -197,6 +206,98 @@ export const inspectorScript: string = `
       depth++;
     }
     return null;
+  }
+
+  // Index-based locator: без привязки к тексту, только selector + nth(index).
+  function buildIndexBasedLocator(el) {
+    function buildSelfCollectionSelector(node) {
+      var tag = node.tagName.toLowerCase();
+
+      // Приоритет: кастомные атрибуты -> id -> семантический класс -> name -> role -> tag
+      for (var ai = 0; ai < ATTRS.length; ai++) {
+        var av = node.getAttribute(ATTRS[ai]);
+        if (av) return '[' + ATTRS[ai] + '="' + esc(av) + '"]';
+      }
+
+      var id = node.getAttribute('id');
+      if (isStableId(id)) return tag + '#' + esc(id);
+
+      var cls = semClass(node);
+      if (cls) return tag + '.' + cls;
+
+      var nm = node.getAttribute('name');
+      if (nm) return tag + '[name="' + esc(nm) + '"]';
+
+      var rl = node.getAttribute('role');
+      if (rl) return tag + '[role="' + esc(rl) + '"]';
+
+      return tag;
+    }
+
+    var root = document;
+    var anchor = '';
+
+    // Ближайший стабильный блок (фрейм/секция/контейнер), чтобы индекс был локальным.
+    var cur = el.parentElement;
+    var depth = 0;
+    while (cur && cur !== document.body && depth < 8) {
+      for (var i = 0; i < ATTRS.length; i++) {
+        var av = cur.getAttribute(ATTRS[i]);
+        if (av) {
+          root = cur;
+          anchor = '[' + ATTRS[i] + '="' + esc(av) + '"]';
+          break;
+        }
+      }
+      if (anchor) break;
+
+      var cid = cur.getAttribute('id');
+      if (isStableId(cid)) {
+        root = cur;
+        anchor = cur.tagName.toLowerCase() + '#' + esc(cid);
+        break;
+      }
+
+      var ccls = semClass(cur);
+      if (ccls) {
+        root = cur;
+        anchor = cur.tagName.toLowerCase() + '.' + ccls;
+        break;
+      }
+
+      cur = cur.parentElement;
+      depth++;
+    }
+
+    var baseSelector = buildSelfCollectionSelector(el);
+
+    function buildLocator(scopeRoot, scopeAnchor, selector) {
+      var scoped = Array.prototype.slice.call(scopeRoot.querySelectorAll(selector));
+      if (scoped.length === 0) return '';
+
+      var idx = scoped.indexOf(el);
+      if (idx < 0) return '';
+
+      var locatorPrefix = scopeAnchor
+        ? 'page.locator("' + scopeAnchor + ' ' + selector + '")'
+        : 'page.locator("' + selector + '")';
+
+      return locatorPrefix + '.nth(' + idx + ')';
+    }
+
+    var localLocator = buildLocator(root, anchor, baseSelector);
+    if (localLocator) return localLocator;
+
+    // Фолбэк: глобальный поиск по тому же селектору.
+    var globalLocator = buildLocator(document, '', baseSelector);
+    if (globalLocator) return globalLocator;
+
+    // Последний фолбэк: по тегу.
+    var tag = el.tagName.toLowerCase();
+    var all = Array.prototype.slice.call(document.querySelectorAll(tag));
+    var idx = all.indexOf(el);
+    if (idx < 0) idx = 0;
+    return 'page.locator("' + tag + '").nth(' + idx + ')';
   }
 
   // ─── CSS-selector ────────────────────────────────────────────────────────────
@@ -430,10 +531,20 @@ export const inspectorScript: string = `
     return check(event);
   }
 
+  var _handling = false;
+  var _lastPayloadKey = '';
+  var _lastPayloadTs = 0;
+  var PAYLOAD_DEDUPE_WINDOW_MS = 1500;
+
   function handleInspectorClick(event) {
     if (!isActivationKeyPressed(event)) return;
+    if (_handling) return;
+    _handling = true;
+    setTimeout(function () { _handling = false; }, 250);
+
     event.preventDefault();
     event.stopPropagation();
+    event.stopImmediatePropagation();
 
     // Shadow DOM: composedPath()[0] даёт реальный целевой элемент
     var path = event.composedPath();
@@ -454,14 +565,26 @@ export const inspectorScript: string = `
     var xpath = buildXPath(target);
     var pw    = result ? result.pw : 'page.locator("' + esc(css) + '")';
     var strat = result ? result.strategy : 'css-fallback';
+    var indexBased = buildIndexBasedLocator(target);
 
     var payload = {
       playwrightLocator: pw,
+      indexBasedLocator: indexBased,
+      pageUrl: window.location.href,
       cssSelector: css,
       xpath: xpath,
       strategy: strat,
       tagName: target.tagName.toLowerCase()
     };
+
+    // Browser-side dedupe to avoid double callback from synthetic/duplicated events.
+    var payloadKey = payload.playwrightLocator + '|' + payload.indexBasedLocator + '|' + payload.cssSelector + '|' + payload.xpath;
+    var now = Date.now();
+    if (payloadKey === _lastPayloadKey && (now - _lastPayloadTs) < PAYLOAD_DEDUPE_WINDOW_MS) {
+      return;
+    }
+    _lastPayloadKey = payloadKey;
+    _lastPayloadTs = now;
 
     if (typeof window.onLocatorGenerated === 'function') {
       window.onLocatorGenerated(payload);
@@ -473,7 +596,8 @@ export const inspectorScript: string = `
     }
   }
 
-  document.addEventListener('click', handleInspectorClick, true);
+  // pointerdown is more stable than click for modified-click inspector mode.
+  document.addEventListener('pointerdown', handleInspectorClick, true);
 
   // Выводим актуальную клавишу в лог браузера
   var keyDisplay = KEY.charAt(0).toUpperCase() + KEY.slice(1);
